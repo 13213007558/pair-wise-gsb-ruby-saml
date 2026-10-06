@@ -1,4 +1,5 @@
 require "xml_security"
+require "onelogin/ruby-saml/authn_context"
 require "onelogin/ruby-saml/attribute_service"
 require "onelogin/ruby-saml/utils"
 require "onelogin/ruby-saml/validation_error"
@@ -66,6 +67,7 @@ module OneLogin
       attr_accessor :authn_context
       attr_accessor :authn_context_comparison
       attr_accessor :authn_context_decl_ref
+      attr_reader   :authn_context_strengths
       attr_reader :attribute_consuming_service
       # Work-flow
       attr_accessor :security
@@ -272,6 +274,19 @@ module OneLogin
         return unless value
 
         Utils::BINDINGS[value.to_sym] || value
+      end
+
+      # Sets the partial order of AuthnContextClassRef strengths used to
+      # validate the AuthnContext of the SAML Response when the
+      # authn_context_comparison is 'minimum', 'maximum' or 'better'.
+      # @param value [Hash] Hash mapping each AuthnContextClassRef to the
+      #   list of AuthnContextClassRefs that are directly stronger than it.
+      #   Classes without a declared relationship are not comparable.
+      # @raise [SettingError] if the configured partial order contains a cycle
+      #
+      def authn_context_strengths=(value)
+        OneLogin::RubySaml::AuthnContext.validate_order!(value)
+        @authn_context_strengths = value
       end
 
       DEFAULTS = {

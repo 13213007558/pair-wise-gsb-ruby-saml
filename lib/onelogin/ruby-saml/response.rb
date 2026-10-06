@@ -1,5 +1,6 @@
 require "xml_security"
 require "onelogin/ruby-saml/attributes"
+require "onelogin/ruby-saml/authn_context"
 
 require "time"
 require "nokogiri"
@@ -412,6 +413,7 @@ module OneLogin
           :validate_one_conditions,
           :validate_conditions,
           :validate_one_authnstatement,
+          :validate_authn_context,
           :validate_audience,
           :validate_destination,
           :validate_issuer,
@@ -707,6 +709,40 @@ module OneLogin
         authnstatement_nodes = xpath_from_signed_assertion('/a:AuthnStatement')
         unless authnstatement_nodes.size == 1
           error_msg = "The Assertion must include one AuthnStatement element"
+          return append_error(error_msg)
+        end
+
+        true
+      end
+
+      # Validates the AuthnContextClassRef of the SAML Response against the
+      # RequestedAuthnContext declared by the SP (settings.authn_context),
+      # using the comparison method of settings.authn_context_comparison
+      # ('exact', 'minimum', 'maximum' or 'better', 'exact' by default).
+      # The strength relationships between classes are taken from the
+      # settings.authn_context_strengths partial order; classes without a
+      # declared relationship are not comparable.
+      # If fails, the error is added to the errors array
+      # @return [Boolean] True if the AuthnContext of the SAML Response
+      #   satisfies the requested AuthnContext, otherwise False
+      #
+      def validate_authn_context
+        requested = settings.authn_context
+        return true if requested.nil? || requested.empty?
+
+        comparison = settings.authn_context_comparison || 'exact'
+        unless OneLogin::RubySaml::AuthnContext::COMPARISONS.include?(comparison)
+          return append_error("Invalid authn_context_comparison value: " + comparison.to_s)
+        end
+
+        actual = authn_context_class_ref
+        if actual.nil? || actual.empty?
+          return append_error("The SAML Response does not contain an AuthnContextClassRef, so the requested AuthnContext cannot be verified")
+        end
+
+        unless OneLogin::RubySaml::AuthnContext.satisfies?(actual, requested, comparison, settings.authn_context_strengths)
+          requested_list = requested.is_a?(Array) ? requested.join(', ') : requested
+          error_msg = "The AuthnContextClassRef of the SAML Response (" + actual + ") does not satisfy the requested AuthnContext (" + requested_list + ") with comparison '" + comparison + "'"
           return append_error(error_msg)
         end
 

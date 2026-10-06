@@ -79,6 +79,51 @@ class SettingsTest < Minitest::Test
       end
     end
 
+    describe "authn_context_strengths" do
+      it "is nil by default" do
+        assert_nil @settings.authn_context_strengths
+      end
+
+      it "provides a getter and a setter" do
+        strengths = { "a" => ["b", "c"], "b" => ["d"] }
+        @settings.authn_context_strengths = strengths
+        assert_equal strengths, @settings.authn_context_strengths
+
+        @settings.authn_context_strengths = nil
+        assert_nil @settings.authn_context_strengths
+      end
+
+      it "accepts an acyclic partial order on the constructor" do
+        settings = OneLogin::RubySaml::Settings.new(:authn_context_strengths => { "a" => ["b"] })
+        assert_equal({ "a" => ["b"] }, settings.authn_context_strengths)
+      end
+
+      it "raises a SettingError when the partial order contains a self loop" do
+        assert_raises OneLogin::RubySaml::SettingError do
+          @settings.authn_context_strengths = { "a" => ["a"] }
+        end
+      end
+
+      it "raises a SettingError when the partial order contains a direct cycle" do
+        error = assert_raises OneLogin::RubySaml::SettingError do
+          @settings.authn_context_strengths = { "a" => ["b"], "b" => ["a"] }
+        end
+        assert_includes error.message, "Cyclic authn_context_strengths configuration detected"
+      end
+
+      it "raises a SettingError when the partial order contains an indirect cycle" do
+        assert_raises OneLogin::RubySaml::SettingError do
+          @settings.authn_context_strengths = { "a" => ["b"], "b" => ["c"], "c" => ["a"] }
+        end
+      end
+
+      it "raises a SettingError when a cyclic partial order is passed on the constructor" do
+        assert_raises OneLogin::RubySaml::SettingError do
+          OneLogin::RubySaml::Settings.new(:authn_context_strengths => { "a" => ["b"], "b" => ["a"] })
+        end
+      end
+    end
+
     it "create settings from hash" do
       config = {
           :assertion_consumer_service_url => "http://app.muda.no/sso",

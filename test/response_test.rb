@@ -1373,6 +1373,242 @@ class RubySamlTest < Minitest::Test
       end
     end
 
+    describe "#validate_authn_context" do
+      let(:password) { "urn:oasis:names:tc:SAML:2.0:ac:classes:Password" }
+      let(:password_protected_transport) { "urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport" }
+      let(:tls_client) { "urn:oasis:names:tc:SAML:2.0:ac:classes:TLSClient" }
+      let(:smartcard_pki) { "urn:oasis:names:tc:SAML:2.0:ac:classes:SmartcardPKI" }
+      let(:strengths) do
+        {
+          password => [password_protected_transport, tls_client],
+          password_protected_transport => [smartcard_pki]
+        }
+      end
+
+      it "return true when no authn_context was requested" do
+        response.settings = settings
+        assert response.send(:validate_authn_context)
+        assert_empty response.errors
+      end
+
+      it "return false when the response does not contain an AuthnContextClassRef" do
+        response.settings = settings
+        response.settings.authn_context = password
+        response.stubs(:authn_context_class_ref).returns(nil)
+        refute response.send(:validate_authn_context)
+        assert_includes response.errors, "The SAML Response does not contain an AuthnContextClassRef, so the requested AuthnContext cannot be verified"
+      end
+
+      it "return false when the comparison method is not valid" do
+        response.settings = settings
+        response.settings.authn_context = password
+        response.settings.authn_context_comparison = 'unsupported'
+        refute response.send(:validate_authn_context)
+        assert_includes response.errors, "Invalid authn_context_comparison value: unsupported"
+      end
+
+      describe "with exact comparison" do
+        it "return true when the response context matches the requested one" do
+          response.settings = settings
+          response.settings.authn_context = password
+          assert response.send(:validate_authn_context)
+          assert_empty response.errors
+        end
+
+        it "return false when the response context does not match the requested one" do
+          response.settings = settings
+          response.settings.authn_context = password_protected_transport
+          refute response.send(:validate_authn_context)
+          assert_includes response.errors, "The AuthnContextClassRef of the SAML Response (urn:oasis:names:tc:SAML:2.0:ac:classes:Password) does not satisfy the requested AuthnContext (urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport) with comparison 'exact'"
+        end
+
+        it "return true when the response context matches one of the requested ones" do
+          response.settings = settings
+          response.settings.authn_context = [password_protected_transport, password]
+          assert response.send(:validate_authn_context)
+          assert_empty response.errors
+        end
+
+        it "return false when the response context matches none of the requested ones" do
+          response.settings = settings
+          response.settings.authn_context = [password_protected_transport, tls_client]
+          refute response.send(:validate_authn_context)
+        end
+      end
+
+      describe "with minimum comparison" do
+        it "return true when the response context is exactly the requested one" do
+          response.settings = settings
+          response.settings.authn_context = password
+          response.settings.authn_context_comparison = 'minimum'
+          assert response.send(:validate_authn_context)
+          assert_empty response.errors
+        end
+
+        it "return true when the response context is stronger than the requested one" do
+          response.settings = settings
+          response.settings.authn_context = password
+          response.settings.authn_context_comparison = 'minimum'
+          response.settings.authn_context_strengths = strengths
+          response.stubs(:authn_context_class_ref).returns(password_protected_transport)
+          assert response.send(:validate_authn_context)
+          assert_empty response.errors
+        end
+
+        it "return true when the response context is transitively stronger than the requested one" do
+          response.settings = settings
+          response.settings.authn_context = password
+          response.settings.authn_context_comparison = 'minimum'
+          response.settings.authn_context_strengths = strengths
+          response.stubs(:authn_context_class_ref).returns(smartcard_pki)
+          assert response.send(:validate_authn_context)
+          assert_empty response.errors
+        end
+
+        it "return false when the response context is weaker than the requested one" do
+          response.settings = settings
+          response.settings.authn_context = password_protected_transport
+          response.settings.authn_context_comparison = 'minimum'
+          response.settings.authn_context_strengths = strengths
+          refute response.send(:validate_authn_context)
+        end
+
+        it "return false when no strength relationship is configured between the classes" do
+          response.settings = settings
+          response.settings.authn_context = password
+          response.settings.authn_context_comparison = 'minimum'
+          response.stubs(:authn_context_class_ref).returns(password_protected_transport)
+          refute response.send(:validate_authn_context)
+        end
+
+        it "return true when the response context is stronger than at least one of the requested ones" do
+          response.settings = settings
+          response.settings.authn_context = [tls_client, password]
+          response.settings.authn_context_comparison = 'minimum'
+          response.settings.authn_context_strengths = strengths
+          response.stubs(:authn_context_class_ref).returns(password_protected_transport)
+          assert response.send(:validate_authn_context)
+          assert_empty response.errors
+        end
+      end
+
+      describe "with maximum comparison" do
+        it "return true when the response context is exactly the requested one" do
+          response.settings = settings
+          response.settings.authn_context = password
+          response.settings.authn_context_comparison = 'maximum'
+          assert response.send(:validate_authn_context)
+          assert_empty response.errors
+        end
+
+        it "return true when the response context is weaker than the requested one" do
+          response.settings = settings
+          response.settings.authn_context = password_protected_transport
+          response.settings.authn_context_comparison = 'maximum'
+          response.settings.authn_context_strengths = strengths
+          assert response.send(:validate_authn_context)
+          assert_empty response.errors
+        end
+
+        it "return false when the response context is stronger than the requested one" do
+          response.settings = settings
+          response.settings.authn_context = password
+          response.settings.authn_context_comparison = 'maximum'
+          response.settings.authn_context_strengths = strengths
+          response.stubs(:authn_context_class_ref).returns(password_protected_transport)
+          refute response.send(:validate_authn_context)
+        end
+
+        it "return true when the response context does not exceed at least one of the requested ones" do
+          response.settings = settings
+          response.settings.authn_context = [tls_client, password_protected_transport]
+          response.settings.authn_context_comparison = 'maximum'
+          response.settings.authn_context_strengths = strengths
+          assert response.send(:validate_authn_context)
+          assert_empty response.errors
+        end
+      end
+
+      describe "with better comparison" do
+        it "return true when the response context is strictly stronger than the requested one" do
+          response.settings = settings
+          response.settings.authn_context = password
+          response.settings.authn_context_comparison = 'better'
+          response.settings.authn_context_strengths = strengths
+          response.stubs(:authn_context_class_ref).returns(password_protected_transport)
+          assert response.send(:validate_authn_context)
+          assert_empty response.errors
+        end
+
+        it "return false when the response context is exactly the requested one" do
+          response.settings = settings
+          response.settings.authn_context = password
+          response.settings.authn_context_comparison = 'better'
+          response.settings.authn_context_strengths = strengths
+          refute response.send(:validate_authn_context)
+        end
+
+        it "return false when the response context is weaker than the requested one" do
+          response.settings = settings
+          response.settings.authn_context = password_protected_transport
+          response.settings.authn_context_comparison = 'better'
+          response.settings.authn_context_strengths = strengths
+          refute response.send(:validate_authn_context)
+        end
+      end
+
+      describe "with two classes stronger than password but incomparable with each other" do
+        it "accept both with minimum comparison against password" do
+          response.settings = settings
+          response.settings.authn_context = password
+          response.settings.authn_context_comparison = 'minimum'
+          response.settings.authn_context_strengths = strengths
+
+          response.stubs(:authn_context_class_ref).returns(password_protected_transport)
+          assert response.send(:validate_authn_context)
+
+          response.stubs(:authn_context_class_ref).returns(tls_client)
+          assert response.send(:validate_authn_context)
+        end
+
+        it "reject each one with minimum comparison against the other" do
+          response.settings = settings
+          response.settings.authn_context_comparison = 'minimum'
+          response.settings.authn_context_strengths = strengths
+
+          response.settings.authn_context = tls_client
+          response.stubs(:authn_context_class_ref).returns(password_protected_transport)
+          refute response.send(:validate_authn_context)
+
+          response.settings.authn_context = password_protected_transport
+          response.stubs(:authn_context_class_ref).returns(tls_client)
+          refute response.send(:validate_authn_context)
+        end
+
+        it "accept both with better comparison against password" do
+          response.settings = settings
+          response.settings.authn_context = password
+          response.settings.authn_context_comparison = 'better'
+          response.settings.authn_context_strengths = strengths
+
+          response.stubs(:authn_context_class_ref).returns(password_protected_transport)
+          assert response.send(:validate_authn_context)
+
+          response.stubs(:authn_context_class_ref).returns(tls_client)
+          assert response.send(:validate_authn_context)
+        end
+
+        it "reject both with exact comparison against the other" do
+          response.settings = settings
+          response.settings.authn_context_strengths = strengths
+
+          response.settings.authn_context = tls_client
+          response.stubs(:authn_context_class_ref).returns(password_protected_transport)
+          refute response.send(:validate_authn_context)
+        end
+      end
+    end
+
     describe "#success" do
       it "find a status code that says success" do
         response.success?

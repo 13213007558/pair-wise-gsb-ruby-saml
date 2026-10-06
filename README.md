@@ -588,6 +588,20 @@ pp(response.attributes.fetch(/givenname/))
 The `saml:AuthnContextClassRef` of the AuthNRequest can be provided by `settings.authn_context`; possible values are described at [SAMLAuthnCxt]. The comparison method can be set using `settings.authn_context_comparison` parameter. Possible values include: 'exact', 'better', 'maximum' and 'minimum' (default value is 'exact').
 To add a `saml:AuthnContextDeclRef`, define `settings.authn_context_decl_ref`.
 
+When `settings.authn_context` is defined, the `OneLogin::RubySaml::Response` validation also checks that the `saml:AuthnContextClassRef` of the SAML Response satisfies the requested authentication context, applying the comparison method of `settings.authn_context_comparison`. For the 'minimum', 'maximum' and 'better' methods, the strength relationships between authentication context classes must be declared as a partial order with `settings.authn_context_strengths`: a Hash that maps each class to the classes that are directly stronger than it. Classes without a declared relationship are not comparable, and a cyclic configuration raises a `OneLogin::RubySaml::SettingError`.
+
+```ruby
+# PasswordProtectedTransport and TLSClient are both stronger than Password,
+# but no strength relationship is declared between them, so they are
+# not comparable with each other.
+settings.authn_context_strengths = {
+  "urn:oasis:names:tc:SAML:2.0:ac:classes:Password" => [
+    "urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport",
+    "urn:oasis:names:tc:SAML:2.0:ac:classes:TLSClient"
+  ]
+}
+```
+
 In a SP-initiated flow, the SP can indicate to the IdP the subject that should be authenticated. This is done by defining the `settings.name_identifier_value_requested` before
 building the authrequest object.
 
