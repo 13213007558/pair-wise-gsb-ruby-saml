@@ -1,5 +1,8 @@
 # Ruby SAML Changelog
 
+### Unreleased
+* Add `OneLogin::RubySaml::ProxyPlanner` to plan identity-proxy next hops: reads the assertion `ProxyRestriction` and the request `Scoping`, computes the remaining proxy count and acceptable audiences, and returns the constraint set to propagate (or a denial reason). A missing `Count` and `Count="0"` are handled distinctly; downstream requests may only tighten constraints. Also adds `Response#proxy_restriction`.
+
 ### 1.18.1  (Jul 29, 2025)
 * Fix vulnerability CVE-2025-54572 Prevent DOS due large SAML Message
 * Adapt tests to be able to execute signature validation sooner

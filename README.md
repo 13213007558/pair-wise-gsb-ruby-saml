@@ -972,6 +972,54 @@ end
 
 The `attribute_value` option additionally accepts an array of possible values.
 
+## Identity Provider Proxying (ProxyRestriction / Scoping)
+
+When acting as an identity proxy, an already validated assertion may carry a
+`<ProxyRestriction>` condition and the incoming AuthnRequest may carry a
+`<Scoping>` element. `OneLogin::RubySaml::ProxyPlanner` reads both and
+computes how many indirections remain and which audiences / Identity
+Providers the next hop may target. It only returns the constraint set you
+may propagate (or a denial reason); issuing the actual assertion or
+AuthnRequest is left to the application.
+
+Note that a missing `Count` attribute and `Count="0"` are not the same:
+an absent Count imposes no limit, while `Count="0"` forbids any further
+proxying. The same applies to `ProxyCount` in `<Scoping>`.
+
+```ruby
+response = OneLogin::RubySaml::Response.new(params[:SAMLResponse], :settings => settings)
+next unless response.is_valid?
+
+scoping = OneLogin::RubySaml::Scoping.from_xml(incoming_authn_request_xml)
+
+plan = OneLogin::RubySaml::ProxyPlanner.plan(
+  :response => response,                         # its ProxyRestriction is read
+  :scoping => scoping,                           # Scoping of the incoming request
+  :requester => "https://sp-downstream.example", # who asked us
+  :next_idp => "https://idp-upstream.example"    # candidate next IdP
+)
+
+if plan.allowed?
+  plan.constraints
+  # => { :proxy_count => 1,                       # remaining indirections (nil = unbounded)
+  #      :audiences => ["https://sp-e.example"],  # acceptable recipients (nil = unrestricted)
+  #      :idp_list => ["https://idp-upstream.example"],
+  #      :requester_ids => ["https://sp-downstream.example"] }
+else
+  plan.denial_reason # => "ProxyRestriction Count=0: ..."
+end
+```
+
+A downstream request may only tighten the planned constraints, never loosen
+them. Use `ProxyPlan#check_outgoing` to verify a Scoping you intend to send
+and to obtain the merged (tightened) constraints:
+
+```ruby
+outgoing = OneLogin::RubySaml::Scoping.new(:proxy_count => 1, :proxy_count_specified => true)
+tightened = plan.check_outgoing(outgoing)
+tightened.allowed? # => false when the outgoing Scoping loosens any constraint
+```
+
 ## Custom Metadata Fields
 
 Some IdPs may require SPs to add additional fields (Organization, ContactPerson, etc.)

@@ -1,5 +1,6 @@
 require "xml_security"
 require "onelogin/ruby-saml/attributes"
+require "onelogin/ruby-saml/proxy_planner"
 
 require "time"
 require "nokogiri"
@@ -358,6 +359,17 @@ module OneLogin
         @audiences ||= begin
           nodes = xpath_from_signed_assertion('/a:Conditions/a:AudienceRestriction/a:Audience')
           nodes.map { |node| Utils.element_text(node) }.reject(&:empty?)
+        end
+      end
+
+      # Gets the ProxyRestriction condition of the SAML Response if exists.
+      # @return [OneLogin::RubySaml::ProxyRestriction|nil] The ProxyRestriction
+      #   condition, or nil when the asserting party did not include one
+      #
+      def proxy_restriction
+        @proxy_restriction ||= begin
+          node = xpath_first_from_signed_assertion('/a:Conditions/a:ProxyRestriction')
+          node.nil? ? nil : OneLogin::RubySaml::ProxyRestriction.from_element(node)
         end
       end
 
