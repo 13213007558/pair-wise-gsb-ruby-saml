@@ -35,7 +35,7 @@ module OneLogin
         @version ||= begin
           node = REXML::XPath.first(
             document,
-            "/p:AuthnRequest | /p:Response | /p:LogoutResponse | /p:LogoutRequest",
+            "/p:AuthnRequest | /p:Response | /p:LogoutResponse | /p:LogoutRequest | /p:ArtifactResolve | /p:ArtifactResponse",
             { "p" => PROTOCOL }
           )
           node.nil? ? nil : node.attributes['Version']
@@ -48,7 +48,7 @@ module OneLogin
         @id ||= begin
           node = REXML::XPath.first(
             document,
-            "/p:AuthnRequest | /p:Response | /p:LogoutResponse | /p:LogoutRequest",
+            "/p:AuthnRequest | /p:Response | /p:LogoutResponse | /p:LogoutRequest | /p:ArtifactResolve | /p:ArtifactResponse",
             { "p" => PROTOCOL }
           )
           node.nil? ? nil : node.attributes['ID']

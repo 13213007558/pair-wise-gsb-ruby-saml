@@ -240,6 +240,7 @@ module OneLogin
             :idp_slo_service_binding => single_logout_service_binding(slo_binding),
             :idp_slo_response_service_url => single_logout_response_service_url(slo_binding),
             :idp_attribute_names => attribute_names,
+            :idp_artifact_resolution_services => artifact_resolution_services,
             :idp_cert => nil,
             :idp_cert_fingerprint => nil,
             :idp_cert_multi => nil,
@@ -343,6 +344,26 @@ module OneLogin
             SamlMetadata::NAMESPACE
           )
           node.value if node
+        end
+
+        # @return [Array<Hash>] the ArtifactResolutionService indexed endpoints,
+        #   each described by its :index, :binding, :url and :is_default keys
+        #
+        def artifact_resolution_services
+          nodes = REXML::XPath.match(
+            @idpsso_descriptor,
+            "md:ArtifactResolutionService",
+            SamlMetadata::NAMESPACE
+          )
+
+          nodes.map do |node|
+            {
+              :index => node.attributes['index'].to_i,
+              :binding => node.attributes['Binding'],
+              :url => node.attributes['Location'],
+              :is_default => node.attributes['isDefault'] == 'true'
+            }
+          end
         end
 
         # @return [String|nil] Unformatted Certificate if exists

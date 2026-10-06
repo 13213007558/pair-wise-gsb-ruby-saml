@@ -40,6 +40,7 @@ module OneLogin
       attr_accessor :idp_cert_multi
       attr_accessor :idp_attribute_names
       attr_accessor :idp_name_qualifier
+      attr_accessor :idp_artifact_resolution_services
       attr_accessor :valid_until
       # SP Data
       attr_writer   :sp_entity_id
@@ -274,6 +275,20 @@ module OneLogin
         Utils::BINDINGS[value.to_sym] || value
       end
 
+      # Finds the IdP ArtifactResolutionService endpoint that matches the
+      # EndpointIndex of a SAML artifact (HTTP-Artifact binding).
+      # @param index [Integer] The EndpointIndex carried by the artifact
+      # @return [Hash|nil] The endpoint descriptor (with :index, :binding, :url
+      #   and :is_default keys) or nil if no endpoint is registered for the index
+      #
+      def artifact_resolution_service_for(index)
+        return nil if idp_artifact_resolution_services.nil?
+
+        idp_artifact_resolution_services.find do |service|
+          (service[:index] || service['index']) == index
+        end
+      end
+
       DEFAULTS = {
         :assertion_consumer_service_binding        => Utils::BINDINGS[:post],
         :single_logout_service_binding             => Utils::BINDINGS[:redirect],
@@ -289,6 +304,7 @@ module OneLogin
           :authn_requests_signed      => false,
           :logout_requests_signed     => false,
           :logout_responses_signed    => false,
+          :want_artifact_response_signed => false,
           :want_assertions_signed     => false,
           :want_assertions_encrypted  => false,
           :want_name_id               => false,
@@ -383,4 +399,3 @@ module OneLogin
     end
   end
 end
-

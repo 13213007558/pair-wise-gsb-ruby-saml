@@ -315,6 +315,50 @@ of using the fingerprint method. The fingerprint, is a hash, so at the end is op
 attack that can end on a signature validation bypass. Other SAML toolkits deprecated that mechanism,
 we maintain it for compatibility and also to be used on test environment.
 
+## HTTP-Artifact Binding
+
+Some IdPs return a SAML artifact on the `SAMLart` parameter instead of a POSTed
+`SAMLResponse`. Use `OneLogin::RubySaml::ArtifactResolver` to dereference it
+through the IdP `ArtifactResolutionService` endpoints published in the IdP
+metadata (`idp_artifact_resolution_services` setting, also filled in by
+`IdpMetadataParser`).
+
+The resolution endpoint is selected from the metadata by the artifact
+EndpointIndex, never derived from the artifact value. The artifact SourceID is
+verified against the SHA-1 of the IdP entityID, the `ArtifactResponse` is
+correlated with the `ArtifactResolve` request and its signature is validated
+before the enclosed `Response` is parsed and validated as usual.
+
+The transport is injected, and artifact reuse is blocked by a caller-provided
+store:
+
+```ruby
+# Responds to call(url, soap_envelope) and returns the SOAP response body.
+transport = lambda do |url, body|
+  uri = URI.parse(url)
+  http = Net::HTTP.new(uri.host, uri.port)
+  http.use_ssl = uri.scheme == "https"
+  http.post(uri.request_uri, body, "Content-Type" => "text/xml").body
+end
+
+# Responds to consume(artifact) and returns truthy only the first time
+# a given artifact is presented (back it with your cache/session store).
+artifact_store = MyArtifactStore.new
+
+resolver = OneLogin::RubySaml::ArtifactResolver.new(
+  saml_settings,
+  :transport => transport,
+  :artifact_store => artifact_store
+)
+
+response = resolver.resolve(params[:SAMLart], :matches_request_id => session[:authn_request_id])
+```
+
+Set `security[:want_artifact_response_signed] = true` to require a signed
+`ArtifactResponse`. The `ArtifactResolve` message itself is signed when
+`security[:authn_requests_signed]` is enabled and the SP has a signing
+certificate and private key.
+
 ## Handling Multiple IdP Certificates
 
 If the IdP metadata XML includes multiple certificates, you may specify the `idp_cert_multi`
