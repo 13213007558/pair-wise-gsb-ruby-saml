@@ -365,6 +365,7 @@ The following attributes are set:
   * name_identifier_format
   * idp_sso_service_url
   * idp_slo_service_url
+  * idp_artifact_resolution_services
   * idp_attribute_names
   * idp_cert
   * idp_cert_fingerprint
@@ -1098,6 +1099,34 @@ def consume
   else
     # Response is invalid, errors in response.errors
   end
+end
+```
+
+### HTTP-Artifact Binding
+
+When the IdP returns `SAMLart`, use `OneLogin::RubySaml::Artifact` instead of the POST `Response` flow. The library validates the type `0x0004` artifact (SourceID and endpoint index), builds the `ArtifactResolve` (and signs it when `artifact_requests_signed` is enabled), verifies the `ArtifactResponse` signature and request association, and validates the contained assertion with the same rules as a POST response.
+
+The SOAP transport and one-time artifact storage are injected by the caller. The library only sends the request to an `ArtifactResolutionService` URL parsed from trusted metadata (or explicitly configured settings); it never constructs a URL from a value contained in the artifact.
+
+```ruby
+artifact_resolver = OneLogin::RubySaml::Artifact.new(
+  params[:SAMLart],
+  settings: saml_settings,
+  matches_request_id: session.delete(:saml_request_id),
+  transport: proc do |endpoint, soap_body, options|
+    # Send soap_body to endpoint with Content-Type text/xml and return the SOAP body.
+    MySoapClient.post(endpoint, soap_body, options[:headers])
+  end,
+  artifact_store: proc do |artifact|
+    # Atomic one-time consumption. Return false when the artifact was already used.
+    $redis.set("saml_artifacts:#{Digest::SHA256.hexdigest(artifact)}", "1", nx: true, ex: 300)
+  end
+)
+
+response = artifact_resolver.resolve
+unless response
+  Rails.logger.warn(artifact_resolver.errors.join(", "))
+  head :unauthorized and return
 end
 ```
 

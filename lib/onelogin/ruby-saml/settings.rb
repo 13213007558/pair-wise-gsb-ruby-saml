@@ -34,6 +34,10 @@ module OneLogin
       attr_writer   :idp_sso_service_url
       attr_writer   :idp_slo_service_url
       attr_accessor :idp_slo_response_service_url
+      attr_writer   :idp_artifact_resolution_service_url
+      attr_reader   :idp_artifact_resolution_service_binding
+      attr_accessor :idp_artifact_resolution_service_index
+      attr_accessor :idp_artifact_resolution_services
       attr_accessor :idp_cert
       attr_accessor :idp_cert_fingerprint
       attr_accessor :idp_cert_fingerprint_algorithm
@@ -114,6 +118,40 @@ module OneLogin
       #
       def idp_slo_service_binding=(value)
         @idp_slo_service_binding = get_binding(value)
+      end
+
+      # @return [String] IdP Artifact Resolution Service URL
+      #
+      def idp_artifact_resolution_service_url
+        return @idp_artifact_resolution_service_url unless @idp_artifact_resolution_service_url.nil?
+
+        service = default_artifact_resolution_service
+        service ? service[:location] : nil
+      end
+
+      # @return [String] IdP Artifact Resolution Service Binding
+      #
+      def idp_artifact_resolution_service_binding
+        return @idp_artifact_resolution_service_binding unless @idp_artifact_resolution_service_binding.nil?
+
+        service = default_artifact_resolution_service
+        service ? service[:binding] : Utils::BINDINGS[:soap]
+      end
+
+      # Setter for IdP Artifact Resolution Service Binding
+      # @param value [String, Symbol].
+      #
+      def idp_artifact_resolution_service_binding=(value)
+        @idp_artifact_resolution_service_binding = get_binding(value)
+      end
+
+      # @return [Integer|nil] IdP Artifact Resolution Service endpoint index
+      #
+      def idp_artifact_resolution_service_index
+        return @idp_artifact_resolution_service_index unless @idp_artifact_resolution_service_index.nil?
+
+        service = default_artifact_resolution_service
+        service ? service[:index] : nil
       end
 
       # @return [String] SP Entity ID
@@ -274,9 +312,16 @@ module OneLogin
         Utils::BINDINGS[value.to_sym] || value
       end
 
+      def default_artifact_resolution_service
+        return if idp_artifact_resolution_services.nil?
+
+        idp_artifact_resolution_services.detect { |service| service[:binding] == Utils::BINDINGS[:soap] }
+      end
+
       DEFAULTS = {
         :assertion_consumer_service_binding        => Utils::BINDINGS[:post],
         :single_logout_service_binding             => Utils::BINDINGS[:redirect],
+        :idp_artifact_resolution_service_binding   => Utils::BINDINGS[:soap],
         :idp_cert_fingerprint_algorithm            => XMLSecurity::Document::SHA1,
         :compress_request                          => true,
         :compress_response                         => true,
@@ -287,6 +332,7 @@ module OneLogin
         
         :security                                  => {
           :authn_requests_signed      => false,
+          :artifact_requests_signed   => false,
           :logout_requests_signed     => false,
           :logout_responses_signed    => false,
           :want_assertions_signed     => false,
@@ -383,4 +429,3 @@ module OneLogin
     end
   end
 end
-

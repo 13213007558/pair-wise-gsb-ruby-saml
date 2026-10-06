@@ -311,9 +311,10 @@ module XMLSecurity
       validate_signature(encoded_idp_cert, true)
     end
 
-    def cache_referenced_xml(soft, check_malformed_doc = true)
+    def cache_referenced_xml(soft, check_malformed_doc = true, root_element_name = nil)
       reset_elements
       @processed = true
+      @root_element_name = root_element_name.nil? ? nil : root_element_name.to_s
 
       begin
         nokogiri_document = XMLSecurity::BaseDocument.safe_load_xml(self, check_malformed_doc)
@@ -329,7 +330,7 @@ module XMLSecurity
       # get signature node
       sig_element = REXML::XPath.first(
           @working_copy,
-          "//ds:Signature",
+          @root_element_name.nil? ? "//ds:Signature" : "//*[local-name()='" + @root_element_name + "']/ds:Signature",
           {"ds"=>DSIG}
       )
 
@@ -362,7 +363,9 @@ module XMLSecurity
         'ds' => DSIG
       )
 
-      noko_sig_element = nokogiri_document.at_xpath('//ds:Signature', 'ds' => DSIG)
+      signature_xpath = @root_element_name.nil? ? '//ds:Signature' : "//*[local-name()='#{@root_element_name}']/ds:Signature"
+      signature_namespaces = { 'ds' => DSIG }
+      noko_sig_element = nokogiri_document.at_xpath(signature_xpath, signature_namespaces)
       noko_signed_info_element = noko_sig_element.at_xpath('./ds:SignedInfo', 'ds' => DSIG)
 
       @cached_signed_info = noko_signed_info_element.canonicalize(canon_algorithm)
@@ -370,18 +373,21 @@ module XMLSecurity
       ### Now get the @referenced_xml to use?
       rexml_signed_info = REXML::Document.new(@cached_signed_info.to_s).root
 
-      noko_sig_element.remove
+      hashed_document = nokogiri_document.dup
+      removed_sig_element = hashed_document.at_xpath(signature_xpath, signature_namespaces)
+      removed_sig_element.remove if removed_sig_element
 
       # get inclusive namespaces
-      inclusive_namespaces = extract_inclusive_namespaces
+      inclusive_namespaces = removed_sig_element.nil? ? extract_inclusive_namespaces : signed_inclusive_namespaces(removed_sig_element)
 
       # check digests
       @ref = REXML::XPath.first(rexml_signed_info, "./ds:Reference", {"ds"=>DSIG})
       return if @ref.nil?
 
-      reference_nodes = nokogiri_document.xpath("//*[@ID=$id]", nil, { 'id' => extract_signed_element_id })
-
-      hashed_element = reference_nodes[0]
+      signed_id = signed_element_id_from_node(removed_sig_element) || extract_signed_element_id
+      hashed_element = hashed_document.xpath("//*[@ID=$id]", nil, { 'id' => signed_id })
+      hashed_element = hashed_element.select { |node| @root_element_name.nil? || node.name == @root_element_name || node.name.split(":").last == @root_element_name }
+      hashed_element = hashed_element.first
       return if hashed_element.nil?
 
       canon_algorithm = canon_algorithm REXML::XPath.first(
@@ -471,16 +477,29 @@ module XMLSecurity
     end
 
     def extract_signed_element_id
-      reference_element = REXML::XPath.first(
-        self,
-        "//ds:Signature/ds:SignedInfo/ds:Reference",
-        {"ds"=>DSIG}
-      )
+      xpath = @root_element_name.nil? ? "//ds:Signature/ds:SignedInfo/ds:Reference" : "//*[local-name()='#{@root_element_name}']/ds:Signature/ds:SignedInfo/ds:Reference"
+      namespaces = {"ds"=>DSIG}
+      reference_element = REXML::XPath.first(self, xpath, namespaces)
 
       return nil if reference_element.nil?
 
       sei = reference_element.attribute("URI").value[1..-1]
       sei.nil? ? reference_element.parent.parent.parent.attribute("ID").value : sei
+    end
+
+    def signed_element_id_from_node(signature_node)
+      reference = signature_node.at_xpath('./ds:SignedInfo/ds:Reference', 'ds' => DSIG)
+      return unless reference
+
+      uri = reference.attribute('URI').value
+      uri[1..-1]
+    end
+
+    def signed_inclusive_namespaces(signature_node)
+      element = signature_node.at_xpath('./ds:SignedInfo/ds:Reference/ds:Transforms/ds:Transform/ec:InclusiveNamespaces', 'ds' => DSIG, 'ec' => C14N)
+      return unless element
+
+      element.attribute('PrefixList').value.split(' ')
     end
 
     def extract_inclusive_namespaces

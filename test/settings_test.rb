@@ -55,6 +55,14 @@ class SettingsTest < Minitest::Test
       end
     end
 
+    it "supports artifact bindings" do
+      @settings.idp_artifact_resolution_service_binding = :soap
+      assert_equal "urn:oasis:names:tc:SAML:2.0:bindings:SOAP", @settings.idp_artifact_resolution_service_binding
+
+      @settings.assertion_consumer_service_binding = :artifact
+      assert_equal "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Artifact", @settings.assertion_consumer_service_binding
+    end
+
     it "idp_sso/slo_service_binding should fallback to :embed_sign inferred value" do
       accessors = [:idp_sso_service_binding, :idp_slo_service_binding]
 

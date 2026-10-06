@@ -34,6 +34,30 @@ class IdpMetadataParserTest < Minitest::Test
       assert_equal '2014-04-17T18:02:33.910Z', settings.valid_until
     end
 
+    it "extracts artifact resolution services" do
+      parser = OneLogin::RubySaml::IdpMetadataParser.new
+      metadata = File.read(File.join(File.dirname(__FILE__), 'metadata', 'idp_descriptor_with_artifact.xml'))
+      settings = parser.parse(metadata)
+
+      assert_equal [
+        {
+          :binding => OneLogin::RubySaml::Utils::BINDINGS[:soap],
+          :location => 'https://idp.example.com/artifact/resolve/9',
+          :index => 9,
+          :is_default => true
+        },
+        {
+          :binding => OneLogin::RubySaml::Utils::BINDINGS[:soap],
+          :location => 'https://idp.example.com/artifact/resolve/7',
+          :index => 7,
+          :is_default => false
+        }
+      ], settings.idp_artifact_resolution_services
+      assert_equal 'https://idp.example.com/artifact/resolve/9', settings.idp_artifact_resolution_service_url
+      assert_equal OneLogin::RubySaml::Utils::BINDINGS[:soap], settings.idp_artifact_resolution_service_binding
+      assert_equal 9, settings.idp_artifact_resolution_service_index
+    end
+
     it "extract certificate from md:KeyDescriptor[@use='signing']" do
       idp_metadata_parser = OneLogin::RubySaml::IdpMetadataParser.new
       idp_metadata = idp_metadata_descriptor

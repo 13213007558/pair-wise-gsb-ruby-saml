@@ -1,5 +1,8 @@
 # Ruby SAML Changelog
 
+### Unreleased
+* Add SAML 2.0 HTTP-Artifact binding support, including type 0x0004 artifact validation, ArtifactResolutionService metadata parsing, SOAP ArtifactResolve construction, ArtifactResponse signature/correlation validation, and caller-injected transport and artifact consumption storage.
+
 ### 1.18.1  (Jul 29, 2025)
 * Fix vulnerability CVE-2025-54572 Prevent DOS due large SAML Message
 * Adapt tests to be able to execute signature validation sooner
