@@ -3,6 +3,7 @@ require "net/http"
 require "net/https"
 require "rexml/document"
 require "rexml/xpath"
+require "time"
 
 # Only supports SAML 2.0
 module OneLogin
@@ -23,6 +24,7 @@ module OneLogin
           DSIG           = "http://www.w3.org/2000/09/xmldsig#".freeze
           NAME_FORMAT    = "urn:oasis:names:tc:SAML:2.0:attrname-format:*".freeze
           SAML_ASSERTION = "urn:oasis:names:tc:SAML:2.0:assertion".freeze
+          SAML_PROTOCOL  = "urn:oasis:names:tc:SAML:2.0:protocol".freeze
         end
 
         NAMESPACE = {
@@ -46,6 +48,31 @@ module OneLogin
           path,
           SamlMetadata::NAMESPACE
         )
+      end
+
+      # Compute the location of an element inside the metadata document as an
+      # XPath-like path, so that conflicting entities can be traced back to
+      # their source position inside (possibly nested) EntitiesDescriptor
+      # aggregates.
+      #
+      # @param element [REXML::Element]
+      # @return [String] e.g. "/md:EntitiesDescriptor/md:EntitiesDescriptor[2]/md:EntityDescriptor[1]"
+      def self.element_location(element)
+        segments = []
+        node = element
+        # Note: REXML::Document inherits from REXML::Element, so the walk has
+        # to stop explicitly at the document node.
+        while node.is_a?(REXML::Element) && !node.is_a?(REXML::Document)
+          parent = node.parent
+          if parent.is_a?(REXML::Element) && !parent.is_a?(REXML::Document)
+            siblings = parent.elements.to_a.select { |e| e.expanded_name == node.expanded_name }
+            segments.unshift(node.expanded_name + "[" + (siblings.index(node) + 1).to_s + "]")
+          else
+            segments.unshift(node.expanded_name)
+          end
+          node = parent
+        end
+        "/" + segments.join("/")
       end
 
       # Parse the Identity Provider metadata and update the settings with the
@@ -183,7 +210,52 @@ module OneLogin
           raise ArgumentError.new("idp_metadata must contain an IDPSSODescriptor element")
         end
 
-        idpsso_descriptors.map {|id| IdpMetadata.new(id, id.parent.attributes["entityID"])}
+        idpsso_descriptors = select_saml2_role_descriptors(idpsso_descriptors)
+        idp_metadatas = idpsso_descriptors.map {|id| IdpMetadata.new(id, id.parent.attributes["entityID"])}
+        resolve_duplicate_entities(idp_metadatas, options)
+      end
+
+      # An EntityDescriptor may carry several IDPSSODescriptor role elements.
+      # Restrict each entity to the roles that declare SAML 2.0 protocol
+      # support, keeping the original roles only when none of them declares it.
+      #
+      # @param idpsso_descriptors [Array<REXML::Element>]
+      # @return [Array<REXML::Element>]
+      def select_saml2_role_descriptors(idpsso_descriptors)
+        idpsso_descriptors.group_by(&:parent).flat_map do |_entity_descriptor, roles|
+          saml2_roles = roles.select do |role|
+            role.attributes["protocolSupportEnumeration"].to_s.split.include?(SamlMetadata::Vocabulary::SAML_PROTOCOL)
+          end
+          saml2_roles.empty? ? roles : saml2_roles
+        end
+      end
+
+      # Nested EntitiesDescriptor aggregates may define the same entityID more
+      # than once. Identical definitions are deduplicated, but conflicting
+      # definitions are reported with the source location of every occurrence
+      # instead of silently picking the first one.
+      #
+      # @param idp_metadatas [Array<IdpMetadata>]
+      # @param options [Hash] options used for parsing the metadata
+      # @return [Array<IdpMetadata>]
+      # @raise [ArgumentError] when the same entityID is defined with conflicting content
+      def resolve_duplicate_entities(idp_metadatas, options)
+        idp_metadatas.group_by(&:entity_id).flat_map do |entity_id, group|
+          by_entity_descriptor = group.group_by { |idp_metadata| idp_metadata.idpsso_descriptor.parent }
+          if by_entity_descriptor.size == 1
+            group
+          else
+            representatives = by_entity_descriptor.map { |entity_descriptor, metadatas| [entity_descriptor, metadatas.first] }
+            parsed_hashes = representatives.map { |_entity_descriptor, idp_metadata| idp_metadata.to_hash(options) }
+            if parsed_hashes.uniq.size > 1
+              locations = representatives.map { |entity_descriptor, _idp_metadata| self.class.element_location(entity_descriptor) }
+              raise ArgumentError.new(
+                "Found " + locations.size.to_s + " conflicting EntityDescriptor elements for entityID " + entity_id.inspect + " at: " + locations.join(", ")
+              )
+            end
+            [representatives.first[1]]
+          end
+        end
       end
 
       # Retrieve the remote IdP metadata from the URL or a cached copy.
@@ -250,18 +322,45 @@ module OneLogin
           end
         end
 
-        # @return [String|nil] 'validUntil' attribute of metadata
+        # Fixed point in time used to compare ISO 8601 durations with each other
+        CACHE_DURATION_REFERENCE = Time.utc(2000, 1, 1).freeze
+
+        # @return [String|nil] the effective 'validUntil' of the entity, which is
+        #   the earliest 'validUntil' declared by the EntityDescriptor itself and
+        #   by its ancestor EntitiesDescriptor elements
         #
         def valid_until
-          root = @idpsso_descriptor.root
-          root.attributes['validUntil'] if root && root.attributes
+          values = validity_scoping_elements.map { |element| element.attributes['validUntil'] }.compact
+          return nil if values.empty?
+
+          values.min_by { |value| Time.parse(value) }
         end
 
-        # @return [String|nil] 'cacheDuration' attribute of metadata
+        # @return [String|nil] the effective 'cacheDuration' of the entity, which is
+        #   the shortest 'cacheDuration' declared by the EntityDescriptor itself and
+        #   by its ancestor EntitiesDescriptor elements
         #
         def cache_duration
-          root = @idpsso_descriptor.root
-          root.attributes['cacheDuration'] if root && root.attributes
+          values = validity_scoping_elements.map { |element| element.attributes['cacheDuration'] }.compact
+          return nil if values.empty?
+
+          values.min_by { |duration| Utils.parse_duration(duration, CACHE_DURATION_REFERENCE) }
+        end
+
+        # @return [Array<REXML::Element>] the EntityDescriptor of the selected role
+        #   and every ancestor element (nested EntitiesDescriptor aggregates up to
+        #   the document root), innermost first
+        #
+        def validity_scoping_elements
+          elements = []
+          node = @idpsso_descriptor.parent
+          # Note: REXML::Document inherits from REXML::Element, so the walk has
+          # to stop explicitly at the document node.
+          while node.is_a?(REXML::Element) && !node.is_a?(REXML::Document)
+            elements << node
+            node = node.parent
+          end
+          elements
         end
 
         # @param name_id_priority [String|Array<String>] The prioritized list of NameIDFormat values to select. Will select first value if nil.

@@ -406,6 +406,30 @@ by the values of binding and NameID:
              )
 ```
 
+### Parsing nested EntitiesDescriptor aggregates
+
+Some identity providers publish their metadata as an aggregate: a root
+`EntitiesDescriptor` element that nests further `EntitiesDescriptor` groups,
+each holding several `EntityDescriptor` elements. The `IdpMetadataParser`
+handles those documents transparently:
+
+* The entity is selected by its `entityID` (with the `entity_id` option), its
+  SAML 2.0 role descriptor, and the requested endpoint bindings
+  (`sso_binding`/`slo_binding` options).
+* The effective `valid_until`/`cacheDuration` of an entity is constrained by
+  the entity itself and by every ancestor `EntitiesDescriptor`: the earliest
+  `validUntil` and the shortest `cacheDuration` of the whole chain win. So a
+  still-valid entity is considered expired as soon as one of its parent
+  aggregates expires.
+* If the same `entityID` is defined more than once with conflicting content,
+  parsing raises an `ArgumentError` that lists the source location of every
+  conflicting `EntityDescriptor` instead of silently picking the first one.
+  Identical duplicates are deduplicated.
+* Certificates and endpoints are always taken from the selected role descriptor
+  only: certificates keep their `signing`/`encryption` usage separation and
+  endpoints are matched by their `Binding`, even when sibling entities of the
+  aggregate use different keys or endpoints.
+
 ### Parsing Metadata into an Hash
 
 The `OneLogin::RubySaml::IdpMetadataParser` also provides the methods `#parse_to_hash` and `#parse_remote_to_hash`.
@@ -420,6 +444,11 @@ Right now there is no method at ruby_saml to validate the signature of the metad
 * Download the XML.
 * Validate the Signature, providing the cert.
 * Provide the XML to the parse method if the signature was validated
+
+When the metadata is an `EntitiesDescriptor` aggregate, validating the
+signature of the whole document once is enough to trust every nested entity.
+The parser still checks the certificate usage (`signing`/`encryption`) and
+the endpoint bindings of the specific role descriptor that gets selected.
 
 ```ruby
 require "xml_security"

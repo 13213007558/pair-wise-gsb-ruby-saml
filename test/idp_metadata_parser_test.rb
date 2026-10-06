@@ -499,6 +499,109 @@ class IdpMetadataParserTest < Minitest::Test
     end
   end
 
+  describe "parsing a nested EntitiesDescriptor aggregate" do
+    before do
+      @idp_metadata_parser = OneLogin::RubySaml::IdpMetadataParser.new
+      @idp_metadata = idp_metadata_nested_entities_descriptor
+      @entity_id = "https://nested-idp.example.com/idp"
+    end
+
+    it "selects the entity by entity_id inside nested aggregates" do
+      settings = @idp_metadata_parser.parse(@idp_metadata, :entity_id => @entity_id)
+      assert_equal @entity_id, settings.idp_entity_id
+    end
+
+    it "returns every IdP of the aggregate when no entity_id is given" do
+      settings = @idp_metadata_parser.parse_to_array(@idp_metadata)
+      assert_equal 2, settings.size
+      assert_equal ["https://nested-idp.example.com/idp", "https://other-idp.example.com/idp"],
+        settings.map { |s| s[:idp_entity_id] }
+    end
+
+    it "selects the SAML 2.0 role descriptor of the entity" do
+      settings = @idp_metadata_parser.parse(@idp_metadata, :entity_id => @entity_id)
+      refute_equal "https://nested-idp.example.com/sso/shibboleth", settings.idp_sso_service_url
+      assert_equal "https://nested-idp.example.com/sso/post", settings.idp_sso_service_url
+      assert_equal "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST", settings.idp_sso_service_binding
+    end
+
+    it "selects the endpoints of the entity by binding" do
+      settings = @idp_metadata_parser.parse(
+        @idp_metadata,
+        :entity_id => @entity_id,
+        :sso_binding => "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect",
+        :slo_binding => "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect"
+      )
+      assert_equal "https://nested-idp.example.com/sso/redirect", settings.idp_sso_service_url
+      assert_equal "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect", settings.idp_sso_service_binding
+      assert_equal "https://nested-idp.example.com/slo", settings.idp_slo_service_url
+      assert_equal "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect", settings.idp_slo_service_binding
+    end
+
+    it "scopes the certificates of the selected role by their use" do
+      settings = @idp_metadata_parser.parse(@idp_metadata, :entity_id => @entity_id)
+      assert_nil settings.idp_cert
+      assert_equal 1, settings.idp_cert_multi[:signing].size
+      assert_equal 1, settings.idp_cert_multi[:encryption].size
+      refute_equal settings.idp_cert_multi[:signing], settings.idp_cert_multi[:encryption]
+    end
+
+    it "uses the certificate of the selected entity and not of its siblings" do
+      settings = @idp_metadata_parser.parse(@idp_metadata, :entity_id => "https://other-idp.example.com/idp")
+      assert_equal "08:EB:6E:60:A2:14:4E:89:EC:FA:05:74:9D:72:BF:5D:BE:54:F0:1A", settings.idp_cert_fingerprint
+      assert_equal "https://other-idp.example.com/sso", settings.idp_sso_service_url
+    end
+
+    it "computes the effective valid_until from the entity and its ancestors" do
+      settings = @idp_metadata_parser.parse(@idp_metadata, :entity_id => @entity_id)
+      assert_equal "2020-01-01T00:00:00Z", settings.valid_until
+    end
+
+    it "keeps the parent EntitiesDescriptor valid_until when the child entity is still valid" do
+      return if RUBY_VERSION < '1.9'
+      Timecop.freeze(Time.parse("2020-06-01T00:00:00Z", Time.now.utc)) do
+        settings = @idp_metadata_parser.parse(@idp_metadata, :entity_id => @entity_id)
+        assert_equal "2020-01-01T00:00:00Z", settings.valid_until
+      end
+    end
+
+    it "applies the cacheDuration of an ancestor EntitiesDescriptor" do
+      return if RUBY_VERSION < '1.9'
+      Timecop.freeze(Time.parse("2025-06-01T00:00:00Z", Time.now.utc)) do
+        settings = @idp_metadata_parser.parse(@idp_metadata, :entity_id => "https://other-idp.example.com/idp")
+        assert_equal "2025-07-01T00:00:00Z", settings.valid_until
+      end
+    end
+  end
+
+  describe "parsing an aggregate with duplicated entity descriptors" do
+    before do
+      @idp_metadata_parser = OneLogin::RubySaml::IdpMetadataParser.new
+    end
+
+    it "reports every source location when the duplicated entities conflict" do
+      exception = assert_raises(ArgumentError) do
+        @idp_metadata_parser.parse(idp_metadata_nested_duplicate_entities, :entity_id => "https://dup-idp.example.com/idp")
+      end
+      assert_match('conflicting EntityDescriptor elements for entityID "https://dup-idp.example.com/idp"', exception.message)
+      assert_match("/md:EntitiesDescriptor/md:EntitiesDescriptor[1]/md:EntityDescriptor[1]", exception.message)
+      assert_match("/md:EntitiesDescriptor/md:EntitiesDescriptor[2]/md:EntityDescriptor[1]", exception.message)
+    end
+
+    it "reports conflicts even when no entity_id is given" do
+      assert_raises(ArgumentError) do
+        @idp_metadata_parser.parse_to_array(idp_metadata_nested_duplicate_entities)
+      end
+    end
+
+    it "deduplicates identical definitions of the same entity" do
+      settings = @idp_metadata_parser.parse_to_array(idp_metadata_nested_duplicate_identical_entities)
+      assert_equal 1, settings.size
+      assert_equal "https://dup-idp.example.com/idp", settings.first[:idp_entity_id]
+      assert_equal "https://dup-idp.example.com/sso", settings.first[:idp_sso_service_url]
+    end
+  end
+
   describe "parsing metadata with IDPSSODescriptor with multiple certs" do
     before do
       @idp_metadata_parser = OneLogin::RubySaml::IdpMetadataParser.new

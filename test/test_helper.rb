@@ -216,6 +216,18 @@ class Minitest::Test
     @idp_metadata_multiple_descriptors2 ||= File.read(File.join(File.dirname(__FILE__), 'metadata', 'idp_multiple_descriptors_2.xml'))
   end
 
+  def idp_metadata_nested_entities_descriptor
+    @idp_metadata_nested_entities_descriptor ||= File.read(File.join(File.dirname(__FILE__), 'metadata', 'idp_nested_entities_descriptor.xml'))
+  end
+
+  def idp_metadata_nested_duplicate_entities
+    @idp_metadata_nested_duplicate_entities ||= File.read(File.join(File.dirname(__FILE__), 'metadata', 'idp_nested_duplicate_entities.xml'))
+  end
+
+  def idp_metadata_nested_duplicate_identical_entities
+    @idp_metadata_nested_duplicate_identical_entities ||= File.read(File.join(File.dirname(__FILE__), 'metadata', 'idp_nested_duplicate_identical_entities.xml'))
+  end
+
   def idp_metadata_multiple_certs
     @idp_metadata_multiple_descriptors ||= File.read(File.join(File.dirname(__FILE__), 'metadata', 'idp_metadata_multi_certs.xml'))
   end
