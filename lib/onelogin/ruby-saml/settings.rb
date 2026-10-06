@@ -1,5 +1,6 @@
 require "xml_security"
 require "onelogin/ruby-saml/attribute_service"
+require "onelogin/ruby-saml/authn_context_order"
 require "onelogin/ruby-saml/utils"
 require "onelogin/ruby-saml/validation_error"
 
@@ -66,6 +67,7 @@ module OneLogin
       attr_accessor :authn_context
       attr_accessor :authn_context_comparison
       attr_accessor :authn_context_decl_ref
+      attr_reader :authn_context_order
       attr_reader :attribute_consuming_service
       # Work-flow
       attr_accessor :security
@@ -77,6 +79,16 @@ module OneLogin
       attr_accessor :issuer
       attr_accessor :idp_sso_target_url
       attr_accessor :idp_slo_target_url
+
+      def authn_context_order=(order)
+        if order.nil?
+          @authn_context_order = nil
+        elsif order.is_a?(AuthnContextOrder)
+          @authn_context_order = order
+        else
+          @authn_context_order = AuthnContextOrder.new(order)
+        end
+      end
 
       # @return [String] IdP Single Sign On Service URL
       #
@@ -383,4 +395,3 @@ module OneLogin
     end
   end
 end
-

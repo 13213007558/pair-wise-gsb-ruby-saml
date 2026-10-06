@@ -588,6 +588,17 @@ pp(response.attributes.fetch(/givenname/))
 The `saml:AuthnContextClassRef` of the AuthNRequest can be provided by `settings.authn_context`; possible values are described at [SAMLAuthnCxt]. The comparison method can be set using `settings.authn_context_comparison` parameter. Possible values include: 'exact', 'better', 'maximum' and 'minimum' (default value is 'exact').
 To add a `saml:AuthnContextDeclRef`, define `settings.authn_context_decl_ref`.
 
+When validating a Response, `exact` compares the asserted class reference directly with the requested class references. The ordered comparisons (`minimum`, `maximum`, and `better`) need an explicit partial order configured with `settings.authn_context_order`. Each edge is `[stronger, weaker]`; either an array of edges or a Hash can be used:
+
+```ruby
+settings.authn_context_order = {
+  "urn:oasis:names:tc:SAML:2.0:ac:classes:Smartcard"      => "urn:oasis:names:tc:SAML:2.0:ac:classes:Password",
+  "urn:oasis:names:tc:SAML:2.0:ac:classes:HardwareToken"  => "urn:oasis:names:tc:SAML:2.0:ac:classes:Password"
+}
+```
+
+Relationships are transitive. Contexts without a configured path are incomparable, so the order of the request array and the URI text are never used to infer strength. A cycle in `authn_context_order` raises an `ArgumentError` when the setting is assigned. Multiple requested contexts follow SAML's alternative semantics: the response is valid when the asserted context satisfies any one of them.
+
 In a SP-initiated flow, the SP can indicate to the IdP the subject that should be authenticated. This is done by defining the `settings.name_identifier_value_requested` before
 building the authrequest object.
 

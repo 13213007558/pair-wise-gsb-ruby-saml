@@ -1115,6 +1115,141 @@ class RubySamlTest < Minitest::Test
       end
     end
 
+    describe "#validate_requested_authn_context" do
+      let(:password) { "urn:oasis:names:tc:SAML:2.0:ac:classes:Password" }
+      let(:hardware_token) { "urn:oasis:names:tc:SAML:2.0:ac:classes:HardwareToken" }
+      let(:smartcard) { "urn:oasis:names:tc:SAML:2.0:ac:classes:Smartcard" }
+
+      before do
+        response.settings = settings
+      end
+
+      def set_actual_context(context)
+        response.stubs(:authn_context_class_refs).returns(Array(context))
+      end
+
+      def configure_order
+        settings.authn_context_order = [
+          [hardware_token, password],
+          [smartcard, password]
+        ]
+      end
+
+      it "skips validation when no context was requested" do
+        set_actual_context(hardware_token)
+        assert response.send(:validate_requested_authn_context)
+      end
+
+      it "validates an exact match" do
+        settings.authn_context = password
+        set_actual_context(password)
+        assert response.send(:validate_requested_authn_context)
+      end
+
+      it "accepts a symbol comparison value" do
+        configure_order
+        settings.authn_context_comparison = :minimum
+        settings.authn_context = password
+        set_actual_context(hardware_token)
+
+        assert response.send(:validate_requested_authn_context)
+      end
+
+      it "rejects an exact mismatch" do
+        settings.authn_context = password
+        set_actual_context(hardware_token)
+        refute response.send(:validate_requested_authn_context)
+      end
+
+      it "validates minimum with equal and stronger contexts" do
+        configure_order
+        settings.authn_context_comparison = "minimum"
+        settings.authn_context = password
+
+        set_actual_context(password)
+        assert response.send(:validate_requested_authn_context)
+
+        set_actual_context(hardware_token)
+        assert response.send(:validate_requested_authn_context)
+      end
+
+      it "rejects minimum with a weaker or incomparable context" do
+        configure_order
+        settings.authn_context_comparison = "minimum"
+        settings.authn_context = smartcard
+
+        set_actual_context(password)
+        refute response.send(:validate_requested_authn_context)
+
+        set_actual_context(hardware_token)
+        refute response.send(:validate_requested_authn_context)
+      end
+
+      it "validates maximum with equal and weaker contexts" do
+        configure_order
+        settings.authn_context_comparison = "maximum"
+        settings.authn_context = smartcard
+
+        set_actual_context(smartcard)
+        assert response.send(:validate_requested_authn_context)
+
+        set_actual_context(password)
+        assert response.send(:validate_requested_authn_context)
+      end
+
+      it "rejects maximum with a stronger or incomparable context" do
+        configure_order
+        settings.authn_context_comparison = "maximum"
+        settings.authn_context = password
+
+        set_actual_context(hardware_token)
+        refute response.send(:validate_requested_authn_context)
+
+        settings.authn_context = smartcard
+        set_actual_context(hardware_token)
+        refute response.send(:validate_requested_authn_context)
+      end
+
+      it "requires better to be strictly stronger" do
+        configure_order
+        settings.authn_context_comparison = "better"
+        settings.authn_context = password
+
+        set_actual_context(hardware_token)
+        assert response.send(:validate_requested_authn_context)
+
+        set_actual_context(password)
+        refute response.send(:validate_requested_authn_context)
+      end
+
+      it "does not infer strength between incomparable stronger-than-password contexts" do
+        configure_order
+        settings.authn_context_comparison = "better"
+        settings.authn_context = smartcard
+        set_actual_context(hardware_token)
+
+        refute response.send(:validate_requested_authn_context)
+      end
+
+      it "accepts a match for any one of multiple requested contexts" do
+        configure_order
+        settings.authn_context_comparison = "minimum"
+        settings.authn_context = [smartcard, password]
+        set_actual_context(hardware_token)
+
+        assert response.send(:validate_requested_authn_context)
+      end
+
+      it "requires an order for ordered comparisons" do
+        settings.authn_context_comparison = "minimum"
+        settings.authn_context = password
+        set_actual_context(hardware_token)
+
+        refute response.send(:validate_requested_authn_context)
+        assert_includes response.errors.first, "authn_context_order is required"
+      end
+    end
+
     describe "#check_conditions" do
       it "check time conditions" do
         response.soft = true

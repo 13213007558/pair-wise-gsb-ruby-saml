@@ -223,6 +223,16 @@ module OneLogin
         @authn_context_class_ref ||= Utils.element_text(xpath_first_from_signed_assertion('/a:AuthnStatement/a:AuthnContext/a:AuthnContextClassRef'))
       end
 
+      # Gets all AuthnContextClassRef values from the signed assertion.
+      # @return [Array<String>] AuthnContextClassRef values
+      #
+      def authn_context_class_refs
+        @authn_context_class_refs ||= begin
+          nodes = xpath_from_signed_assertion('/a:AuthnStatement/a:AuthnContext/a:AuthnContextClassRef')
+          nodes.map { |node| Utils.element_text(node) }.compact.reject { |value| value.empty? }
+        end
+      end
+
       # Checks if the Status has the "Success" code
       # @return [Boolean] True if the StatusCode is Success
       #
@@ -412,6 +422,7 @@ module OneLogin
           :validate_one_conditions,
           :validate_conditions,
           :validate_one_authnstatement,
+          :validate_requested_authn_context,
           :validate_audience,
           :validate_destination,
           :validate_issuer,
@@ -711,6 +722,50 @@ module OneLogin
         end
 
         true
+      end
+
+      # Validates the assertion AuthnContextClassRef against the contexts
+      # requested by the service provider.
+      # @return [Boolean] True if the assertion satisfies the request, otherwise False if soft=True
+      # @raise [ValidationError] if soft == false and validation fails
+      #
+      def validate_requested_authn_context
+        return true if settings.nil? || settings.authn_context.nil?
+
+        requested_contexts = Array(settings.authn_context)
+        actual_contexts = authn_context_class_refs
+        comparison = (settings.authn_context_comparison || 'exact').to_s
+
+        unless %w(exact minimum maximum better).include?(comparison)
+          return append_error("Unsupported AuthnContext comparison: #{comparison}")
+        end
+
+        if actual_contexts.empty?
+          return append_error("The Response did not contain an AuthnContextClassRef")
+        end
+
+        unless comparison == 'exact' || settings.authn_context_order
+          return append_error("authn_context_order is required to validate the #{comparison} AuthnContext comparison")
+        end
+
+        unless actual_contexts.any? { |actual_context| requested_contexts.any? { |requested_context| authn_context_matches?(actual_context, requested_context, comparison) } }
+          return append_error("The AuthnContextClassRef #{actual_contexts.join(',')} does not satisfy the requested authentication context")
+        end
+
+        true
+      end
+
+      def authn_context_matches?(actual_context, requested_context, comparison)
+        case comparison
+        when 'exact'
+          actual_context == requested_context
+        when 'minimum'
+          actual_context == requested_context || settings.authn_context_order.stronger?(actual_context, requested_context)
+        when 'maximum'
+          actual_context == requested_context || settings.authn_context_order.weaker?(actual_context, requested_context)
+        when 'better'
+          settings.authn_context_order.stronger?(actual_context, requested_context)
+        end
       end
 
       # Validates the Conditions. (If the response was initialized with the :skip_conditions option, this validation is skipped,

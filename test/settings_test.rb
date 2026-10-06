@@ -33,6 +33,15 @@ class SettingsTest < Minitest::Test
       end
     end
 
+    it "parses authentication context order as a partial order" do
+      order = [
+        ["urn:oasis:names:tc:SAML:2.0:ac:classes:Smartcard", "urn:oasis:names:tc:SAML:2.0:ac:classes:Password"]
+      ]
+      @settings.authn_context_order = order
+
+      assert @settings.authn_context_order.is_a?(OneLogin::RubySaml::AuthnContextOrder)
+    end
+
     it "should provide getters and settings for binding parameters" do
       accessors = [
         :protocol_binding, :assertion_consumer_service_binding,
