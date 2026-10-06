@@ -385,6 +385,24 @@ IdpMetadataParser by its Entity Id value:
              )
 ```
 
+### Parsing nested EntitiesDescriptor aggregates
+
+Federation operators usually publish a signed `md:EntitiesDescriptor` aggregate
+that nests further `md:EntitiesDescriptor` levels. The parser looks up the
+`md:EntityDescriptor` elements at any depth of the aggregate, so the same
+`:entity_id`, `:sso_binding`, `:slo_binding` and `:name_id_format` options
+also select the configuration of entities published that way.
+
+The validity of an entity is constrained by its own descriptor and by every
+ancestor descriptor of the aggregate: the effective `valid_until` of the
+parsed settings is the earliest `validUntil`/`cacheDuration` expiration found
+along that chain, so an entity is considered expired as soon as one of its
+parents is, even when its own `validUntil` is still in the future.
+
+When the aggregate defines the same `entityID` more than once with conflicting
+content, the parser raises an `ArgumentError` reporting the location of every
+definition instead of silently keeping the first one.
+
 ### Retrieve one Entity Descriptor with a specific binding and nameid format when several are available
 
 If the metadata contains multiple bindings and NameID formats, the relevant ones
@@ -415,7 +433,27 @@ Those return an Hash instead of a `Settings` object, which may be useful for con
 
 ### Validating Signature of Metadata and retrieve settings
 
-Right now there is no method at ruby_saml to validate the signature of the metadata that is going to be parsed, but it can be done as follows:
+The signature of the metadata document can be validated while parsing by
+enabling the `:validate_signature` option and providing the certificate of
+the metadata signer with `:signature_cert`. On a trusted
+`md:EntitiesDescriptor` aggregate the signature of the root element covers
+every nested entity, so a single verification is enough; the certificate use
+and the endpoint bindings of the selected role are still checked afterwards.
+
+```ruby
+  settings = idp_metadata_parser.parse_remote(
+               "https://example.com/auth/saml2/idp/metadata",
+               validate_cert,
+               entity_id: "http//example.com/target/entity",
+               validate_signature: true,
+               signature_cert: "<certificate_of_the_metadata_signer>"
+             )
+```
+
+A `OneLogin::RubySaml::ValidationError` is raised when the signature of the
+metadata is missing or invalid.
+
+Alternatively, the signature can be validated manually before parsing:
 
 * Download the XML.
 * Validate the Signature, providing the cert.

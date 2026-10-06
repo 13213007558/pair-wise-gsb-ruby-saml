@@ -755,4 +755,162 @@ WQO0LPxPqRiUqUzyhDhLo/xXNrHCu4VbMw=="]
       assert_nil settings.idp_slo_response_service_url
     end
   end
+
+  describe "parsing a nested EntitiesDescriptor aggregate" do
+    before do
+      @idp_metadata_parser = OneLogin::RubySaml::IdpMetadataParser.new
+      @nested_entity_id = "https://nested-idp.example.com/metadata"
+    end
+
+    def sha1_fingerprint(cert_b64)
+      cert = OpenSSL::X509::Certificate.new(Base64.decode64(cert_b64))
+      OpenSSL::Digest::SHA1.hexdigest(cert.to_der).upcase.scan(/../).join(":")
+    end
+
+    it "selects the entity descriptor by entity_id within nested aggregates" do
+      settings = @idp_metadata_parser.parse(idp_metadata_nested_entities, :entity_id => @nested_entity_id)
+
+      assert_equal @nested_entity_id, settings.idp_entity_id
+      assert_equal "https://nested-idp.example.com/sso/redirect", settings.idp_sso_service_url
+      assert_equal "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect", settings.idp_sso_service_binding
+      assert_equal "https://nested-idp.example.com/slo/redirect", settings.idp_slo_service_url
+      assert_equal "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress", settings.name_identifier_format
+    end
+
+    it "selects the endpoints by binding of the selected role" do
+      settings = @idp_metadata_parser.parse(idp_metadata_nested_entities,
+        :entity_id => @nested_entity_id,
+        :sso_binding => "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST",
+        :slo_binding => "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST")
+
+      assert_equal "https://nested-idp.example.com/sso/post", settings.idp_sso_service_url
+      assert_equal "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST", settings.idp_sso_service_binding
+      assert_equal "https://nested-idp.example.com/slo/post", settings.idp_slo_service_url
+      assert_equal "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST", settings.idp_slo_service_binding
+    end
+
+    it "checks the certificate use of the selected role" do
+      settings = @idp_metadata_parser.parse(idp_metadata_nested_entities, :entity_id => @nested_entity_id)
+
+      assert_nil settings.idp_cert
+      assert_equal 1, settings.idp_cert_multi[:signing].size
+      assert_equal 1, settings.idp_cert_multi[:encryption].size
+      assert_equal "F1:3C:6B:80:90:5A:03:0E:6C:91:3E:5D:15:FA:DD:B0:16:45:48:72", sha1_fingerprint(settings.idp_cert_multi[:signing].first)
+      assert_equal "08:EB:6E:60:A2:14:4E:89:EC:FA:05:74:9D:72:BF:5D:BE:54:F0:1A", sha1_fingerprint(settings.idp_cert_multi[:encryption].first)
+    end
+
+    it "parses every IdP entity of the aggregate and skips entities without the IdP role" do
+      idps = @idp_metadata_parser.parse_to_array(idp_metadata_nested_entities)
+
+      assert_equal ["https://nested-idp.example.com/metadata", "https://toplevel-idp.example.com/metadata"], idps.map { |idp| idp[:idp_entity_id] }
+    end
+
+    it "computes the effective valid_until from the entity and its ancestors" do
+      settings = @idp_metadata_parser.parse(idp_metadata_nested_entities, :entity_id => @nested_entity_id)
+      assert_equal "2025-06-01T00:00:00Z", settings.valid_until
+
+      settings = @idp_metadata_parser.parse(idp_metadata_nested_entities, :entity_id => "https://toplevel-idp.example.com/metadata")
+      assert_equal "2030-01-01T00:00:00Z", settings.valid_until
+    end
+
+    it "constrains the entity by an expired ancestor even when the entity itself is not expired" do
+      return if RUBY_VERSION < '1.9'
+
+      Timecop.freeze(Time.parse("2026-01-01T00:00:00Z", Time.now.utc)) do
+        settings = @idp_metadata_parser.parse(idp_metadata_nested_entities, :entity_id => @nested_entity_id)
+
+        # the entity itself is valid until 2028, but its parent EntitiesDescriptor expired on 2025-06-01
+        assert_equal "2025-06-01T00:00:00Z", settings.valid_until
+        assert Time.parse(settings.valid_until) < Time.now
+      end
+    end
+
+    it "applies the earliest cacheDuration constraint of the ancestor chain" do
+      return if RUBY_VERSION < '1.9'
+
+      metadata = idp_metadata_nested_entities.sub(
+        '<md:EntitiesDescriptor ID="_agg-nested" validUntil="2025-06-01T00:00:00Z">',
+        '<md:EntitiesDescriptor ID="_agg-nested" cacheDuration="PT2H">')
+      Timecop.freeze(Time.parse("2020-01-01T00:00:00Z", Time.now.utc)) do
+        settings = @idp_metadata_parser.parse(metadata, :entity_id => @nested_entity_id)
+        assert_equal "2020-01-01T02:00:00Z", settings.valid_until
+      end
+    end
+  end
+
+  describe "parsing an aggregate with duplicate entity definitions" do
+    before do
+      @idp_metadata_parser = OneLogin::RubySaml::IdpMetadataParser.new
+    end
+
+    it "reports all source locations when the duplicates conflict" do
+      exception = assert_raises(ArgumentError) do
+        @idp_metadata_parser.parse(idp_metadata_duplicate_entities, :entity_id => "https://dup.example.com/idp")
+      end
+
+      assert_match 'Multiple conflicting EntityDescriptor definitions for entityID "https://dup.example.com/idp"', exception.message
+      assert_match "/md:EntitiesDescriptor/md:EntityDescriptor[1]", exception.message
+      assert_match "/md:EntitiesDescriptor/md:EntitiesDescriptor[1]/md:EntityDescriptor[1]", exception.message
+    end
+
+    it "does not silently take the first definition when no entity_id is given" do
+      assert_raises(ArgumentError) do
+        @idp_metadata_parser.parse_to_array(idp_metadata_duplicate_entities)
+      end
+    end
+
+    it "collapses identical duplicate definitions" do
+      metadata = idp_metadata_duplicate_entities.sub("https://dup.example.com/sso/two", "https://dup.example.com/sso/one")
+      settings = @idp_metadata_parser.parse(metadata, :entity_id => "https://dup.example.com/idp")
+
+      assert_equal "https://dup.example.com/sso/one", settings.idp_sso_service_url
+    end
+  end
+
+  describe "validating the signature of a trusted aggregate" do
+    before do
+      @idp_metadata_parser = OneLogin::RubySaml::IdpMetadataParser.new
+      @certificate = OpenSSL::X509::Certificate.new(read_certificate("ruby-saml.crt"))
+      @private_key = OpenSSL::PKey::RSA.new(read_certificate("ruby-saml.key"))
+    end
+
+    def sign_metadata(metadata)
+      document = XMLSecurity::Document.new(metadata)
+      document.sign_document(@private_key, @certificate)
+      document.to_s
+    end
+
+    it "parses the selected entity when the aggregate signature is valid" do
+      settings = @idp_metadata_parser.parse(sign_metadata(idp_metadata_nested_entities),
+        :entity_id => "https://nested-idp.example.com/metadata",
+        :validate_signature => true,
+        :signature_cert => @certificate)
+
+      assert_equal "https://nested-idp.example.com/metadata", settings.idp_entity_id
+    end
+
+    it "rejects the aggregate when the content was tampered after signing" do
+      tampered = sign_metadata(idp_metadata_nested_entities).sub(
+        "https://nested-idp.example.com/sso/redirect",
+        "https://evil.example.com/sso")
+
+      assert_raises(OneLogin::RubySaml::ValidationError) do
+        @idp_metadata_parser.parse(tampered, :validate_signature => true, :signature_cert => @certificate)
+      end
+    end
+
+    it "rejects the aggregate when it is not signed" do
+      assert_raises(OneLogin::RubySaml::ValidationError) do
+        @idp_metadata_parser.parse(idp_metadata_nested_entities, :validate_signature => true, :signature_cert => @certificate)
+      end
+    end
+
+    it "requires a signature_cert when signature validation is enabled" do
+      exception = assert_raises(ArgumentError) do
+        @idp_metadata_parser.parse(idp_metadata_nested_entities, :validate_signature => true)
+      end
+
+      assert_match "signature_cert", exception.message
+    end
+  end
 end

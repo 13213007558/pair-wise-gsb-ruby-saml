@@ -3,6 +3,7 @@ require "net/http"
 require "net/https"
 require "rexml/document"
 require "rexml/xpath"
+require "time"
 
 # Only supports SAML 2.0
 module OneLogin
@@ -48,6 +49,17 @@ module OneLogin
         )
       end
 
+      # fetch entity descriptors from a metadata document, including the
+      # ones nested inside md:EntitiesDescriptor aggregates
+      def self.get_entity_descriptors(metadata_document, only_entity_id=nil)
+        path = "//md:EntityDescriptor#{only_entity_id && '[@entityID="' + only_entity_id + '"]'}"
+        REXML::XPath.match(
+          metadata_document,
+          path,
+          SamlMetadata::NAMESPACE
+        )
+      end
+
       # Parse the Identity Provider metadata and update the settings with the
       # IdP values
       #
@@ -60,6 +72,8 @@ module OneLogin
       # @option options [String, Array<String>, nil] :sso_binding an ordered list of bindings to detect the single signon URL. The first binding in the list that is included in the metadata will be used.
       # @option options [String, Array<String>, nil] :slo_binding an ordered list of bindings to detect the single logout URL. The first binding in the list that is included in the metadata will be used.
       # @option options [String, Array<String>, nil] :name_id_format an ordered list of NameIDFormats to detect a desired value. The first NameIDFormat in the list that is included in the metadata will be used.
+      # @option options [Boolean] :validate_signature when true, the XML signature of the metadata document (the signature of the root element of a trusted aggregate) is verified before parsing. Requires :signature_cert.
+      # @option options [String, OpenSSL::X509::Certificate, nil] :signature_cert the certificate of the metadata signer used when :validate_signature is enabled.
       #
       # @return [OneLogin::RubySaml::Settings]
       #
@@ -116,6 +130,8 @@ module OneLogin
       # @option options [String, Array<String>, nil] :sso_binding an ordered list of bindings to detect the single signon URL. The first binding in the list that is included in the metadata will be used.
       # @option options [String, Array<String>, nil] :slo_binding an ordered list of bindings to detect the single logout URL. The first binding in the list that is included in the metadata will be used.
       # @option options [String, Array<String>, nil] :name_id_format an ordered list of NameIDFormats to detect a desired value. The first NameIDFormat in the list that is included in the metadata will be used.
+      # @option options [Boolean] :validate_signature when true, the XML signature of the metadata document (the signature of the root element of a trusted aggregate) is verified before parsing. Requires :signature_cert.
+      # @option options [String, OpenSSL::X509::Certificate, nil] :signature_cert the certificate of the metadata signer used when :validate_signature is enabled.
       #
       # @return [OneLogin::RubySaml::Settings]
       def parse(idp_metadata, options = {})
@@ -169,21 +185,45 @@ module OneLogin
       # @option options [String, Array<String>, nil] :slo_binding an ordered list of bindings to detect the single logout URL. The first binding in the list that is included in the metadata will be used.
       # @option options [String, Array<String>, nil] :name_id_format an ordered list of NameIDFormats to detect a desired value. The first NameIDFormat in the list that is included in the metadata will be used.
       #
+      # @option options [Boolean] :validate_signature when true, the XML signature of the metadata document (the signature of the root element of a trusted aggregate) is verified before parsing. Requires :signature_cert.
+      # @option options [String, OpenSSL::X509::Certificate, nil] :signature_cert the certificate of the metadata signer used when :validate_signature is enabled.
+      #
       # @return [Array<Hash>]
       def parse_to_array(idp_metadata, options = {})
         parse_to_idp_metadata_array(idp_metadata, options).map { |idp_md| idp_md.to_hash(options) }
       end
 
+      # Select the entity descriptors holding an IDPSSODescriptor role from
+      # the metadata document, including the entities nested inside
+      # md:EntitiesDescriptor aggregates, and wrap them as IdpMetadata.
+      #
+      # The effective validity (validUntil / cacheDuration) of each entity is
+      # constrained by its own descriptor and by every ancestor descriptor of
+      # the aggregate; the earliest expiration applies.
+      #
+      # @raise [ArgumentError] when no IDPSSODescriptor role is found, or when
+      #   several EntityDescriptor elements with the same entityID define the
+      #   role in conflicting ways (all source locations are reported).
+      # @raise [OneLogin::RubySaml::ValidationError] when :validate_signature
+      #   is enabled and the signature of the metadata document is not valid.
+      #
+      # @return [Array<IdpMetadata>]
       def parse_to_idp_metadata_array(idp_metadata, options = {})
         @document = REXML::Document.new(idp_metadata)
         @options = options
 
-        idpsso_descriptors = self.class.get_idps(@document, options[:entity_id])
-        if !idpsso_descriptors.any?
+        validate_metadata_signature(idp_metadata, options) if options[:validate_signature]
+
+        entity_descriptors = self.class.get_entity_descriptors(@document, options[:entity_id]).select do |entity_descriptor|
+          !idpsso_descriptor(entity_descriptor).nil?
+        end
+        if entity_descriptors.empty?
           raise ArgumentError.new("idp_metadata must contain an IDPSSODescriptor element")
         end
 
-        idpsso_descriptors.map {|id| IdpMetadata.new(id, id.parent.attributes["entityID"])}
+        resolve_entity_descriptor_conflicts(entity_descriptors).map do |entity_descriptor|
+          IdpMetadata.new(idpsso_descriptor(entity_descriptor), entity_descriptor.attributes["entityID"])
+        end
       end
 
       # Retrieve the remote IdP metadata from the URL or a cached copy.
@@ -220,6 +260,84 @@ module OneLogin
 
       private
 
+      # Validate the signature of the whole metadata document. On an
+      # aggregate file the signature of the root (Entities)Descriptor covers
+      # every nested entity, so a single check is enough to trust the
+      # document; the selected role is still checked afterwards for
+      # certificate use and endpoint bindings.
+      #
+      # @param idp_metadata [String] The metadata document
+      # @param options [Hash] options used for parsing the metadata
+      # @option options [String, OpenSSL::X509::Certificate] :signature_cert the trusted certificate of the metadata signer
+      #
+      # @raise [ArgumentError] If no :signature_cert option is provided
+      # @raise [ValidationError] If the signature of the metadata is not valid
+      def validate_metadata_signature(idp_metadata, options)
+        cert = options[:signature_cert]
+        if cert.nil?
+          raise ArgumentError.new("a :signature_cert option is required when :validate_signature is enabled")
+        end
+        cert = OpenSSL::X509::Certificate.new(cert) if cert.is_a?(String)
+
+        signed_document = XMLSecurity::SignedDocument.new(idp_metadata)
+        unless signed_document.validate_document_with_cert(cert, false)
+          raise OneLogin::RubySaml::ValidationError.new("Metadata signature validation failed")
+        end
+      end
+
+      # @return [REXML::Element, nil] the IDPSSODescriptor role of the entity descriptor
+      def idpsso_descriptor(entity_descriptor)
+        REXML::XPath.first(entity_descriptor, "md:IDPSSODescriptor", SamlMetadata::NAMESPACE)
+      end
+
+      # Reject conflicting duplicate definitions of the same entityID,
+      # reporting every source location instead of silently keeping the
+      # first one. Identical duplicates are collapsed.
+      #
+      # @return [Array<REXML::Element>] the entity descriptors to parse
+      # @raise [ArgumentError] If conflicting definitions of an entityID exist
+      def resolve_entity_descriptor_conflicts(entity_descriptors)
+        entity_descriptors.group_by { |ed| ed.attributes["entityID"] }.flat_map do |entity_id, descriptors|
+          next descriptors if descriptors.size == 1
+
+          roles = descriptors.map { |ed| normalized_descriptor(idpsso_descriptor(ed)) }
+          if roles.uniq.size == 1
+            [descriptors.first]
+          else
+            locations = descriptors.map { |ed| element_location(ed) }
+            raise ArgumentError.new(
+              "Multiple conflicting EntityDescriptor definitions for entityID \"#{entity_id}\" found at: #{locations.join(', ')}"
+            )
+          end
+        end
+      end
+
+      # Serialized form of a descriptor, normalized so that insignificant
+      # whitespace does not produce false conflicts between duplicates.
+      #
+      # @return [String]
+      def normalized_descriptor(element)
+        element.to_s.gsub(/>\s+</, "><").strip
+      end
+
+      # @return [String] the path of the element within the document,
+      #   e.g. /md:EntitiesDescriptor/md:EntitiesDescriptor[1]/md:EntityDescriptor[2]
+      def element_location(element)
+        segments = []
+        current = element
+        while current.is_a?(REXML::Element) && !current.is_a?(REXML::Document)
+          parent = current.parent
+          if parent.is_a?(REXML::Element) && !parent.is_a?(REXML::Document)
+            same_name = parent.elements.select { |sibling| sibling.expanded_name == current.expanded_name }
+            segments.unshift("#{current.expanded_name}[#{same_name.index(current) + 1}]")
+          else
+            segments.unshift(current.expanded_name)
+          end
+          current = parent
+        end
+        "/#{segments.join('/')}"
+      end
+
       class IdpMetadata
         attr_reader :idpsso_descriptor, :entity_id
 
@@ -250,18 +368,24 @@ module OneLogin
           end
         end
 
+        # Effective 'validUntil' of the entity: the constraints of the
+        # entity descriptor and of every ancestor (Entities)Descriptor of a
+        # nested aggregate all apply, so the earliest expiration wins.
+        #
         # @return [String|nil] 'validUntil' attribute of metadata
         #
         def valid_until
-          root = @idpsso_descriptor.root
-          root.attributes['validUntil'] if root && root.attributes
+          earliest_validity_constraint('validUntil') { |raw| safe_parse_time(raw) }
         end
 
+        # Effective 'cacheDuration' of the entity: like 'validUntil', the
+        # ancestor chain of a nested aggregate is taken into account and the
+        # constraint that expires first wins.
+        #
         # @return [String|nil] 'cacheDuration' attribute of metadata
         #
         def cache_duration
-          root = @idpsso_descriptor.root
-          root.attributes['cacheDuration'] if root && root.attributes
+          earliest_validity_constraint('cacheDuration') { |raw| safe_parse_duration(raw) }
         end
 
         # @param name_id_priority [String|Array<String>] The prioritized list of NameIDFormat values to select. Will select first value if nil.
@@ -433,6 +557,53 @@ module OneLogin
         end
 
         private
+
+        # The entity descriptor of the selected role and all its ancestor
+        # elements, e.g. the nested EntitiesDescriptor levels of an aggregate.
+        #
+        # @return [Array<REXML::Element>]
+        #
+        def descriptor_chain
+          chain = []
+          element = @idpsso_descriptor.parent
+          while element.is_a?(REXML::Element)
+            chain << element
+            element = element.parent
+          end
+          chain
+        end
+
+        # Effective value of a validity constraint attribute ('validUntil'
+        # or 'cacheDuration'): every descriptor of the chain may constrain
+        # the validity, so the earliest expiration applies. Returns the raw
+        # attribute value of the binding constraint.
+        #
+        # @return [String|nil]
+        #
+        def earliest_validity_constraint(attribute)
+          constraints = descriptor_chain.map do |element|
+            raw = element.attributes[attribute]
+            next if raw.nil?
+
+            timestamp = yield(raw)
+            timestamp.nil? ? nil : [timestamp, raw]
+          end.compact
+
+          earliest = constraints.min_by { |timestamp, _raw| timestamp }
+          earliest && earliest[1]
+        end
+
+        def safe_parse_time(raw)
+          Time.parse(raw)
+        rescue StandardError
+          nil
+        end
+
+        def safe_parse_duration(raw)
+          Utils.parse_duration(raw)
+        rescue StandardError
+          nil
+        end
 
         def first_ranked_text(nodes, priority = nil)
           return unless nodes.any?

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<md:EntitiesDescriptor xmlns:md="urn:oasis:names:tc:SAML:2.0:metadata" xmlns:ds="http://www.w3.org/2000/09/xmldsig#">
+  <md:EntityDescriptor entityID="https://dup.example.com/idp">
+    <md:IDPSSODescriptor protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol">
+      <md:SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" Location="https://dup.example.com/sso/one"/>
+    </md:IDPSSODescriptor>
+  </md:EntityDescriptor>
+  <md:EntitiesDescriptor>
+    <md:EntityDescriptor entityID="https://dup.example.com/idp">
+      <md:IDPSSODescriptor protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol">
+        <md:SingleSignOnService Binding="urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect" Location="https://dup.example.com/sso/two"/>
+      </md:IDPSSODescriptor>
+    </md:EntityDescriptor>
+  </md:EntitiesDescriptor>
+</md:EntitiesDescriptor>

@@ -1,5 +1,8 @@
 # Ruby SAML Changelog
 
+### Unreleased
+* IdpMetadataParser: support nested `md:EntitiesDescriptor` aggregates. Entities are selected by `:entity_id`, role and binding at any depth of the aggregate; the effective `valid_until`/`cacheDuration` is constrained by the entity and all its ancestor descriptors; conflicting duplicate definitions of the same entityID raise an `ArgumentError` reporting every source location; new `:validate_signature` + `:signature_cert` options verify the signature of the whole trusted aggregate while parsing.
+
 ### 1.18.1  (Jul 29, 2025)
 * Fix vulnerability CVE-2025-54572 Prevent DOS due large SAML Message
 * Adapt tests to be able to execute signature validation sooner
