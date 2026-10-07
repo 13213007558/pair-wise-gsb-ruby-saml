@@ -28,6 +28,19 @@ module OneLogin
         @uuid
       end
 
+      # @return [OneLogin::RubySaml::RequestedAuthnContext|nil] Authentication context constraints sent in the request.
+      #
+      def requested_authn_context(settings)
+        return if settings.authn_context.nil? && settings.authn_context_decl_ref.nil?
+
+        RequestedAuthnContext.new(
+          request_id: request_id,
+          comparison: settings.authn_context_comparison || "exact",
+          class_refs: settings.authn_context,
+          decl_refs: settings.authn_context_decl_ref
+        )
+      end
+
       # Creates the AuthNRequest string.
       # @param settings [OneLogin::RubySaml::Settings|nil] Toolkit settings
       # @param params [Hash] Some extra parameters to be added in the GET for example the RelayState
@@ -105,6 +118,7 @@ module OneLogin
 
       def create_xml_document(settings)
         time = Time.now.utc.strftime("%Y-%m-%dT%H:%M:%SZ")
+        requested_context_constraints = requested_authn_context(settings)
 
         request_doc = XMLSecurity::Document.new
         request_doc.uuid = uuid
@@ -147,32 +161,19 @@ module OneLogin
           }
         end
 
-        if settings.authn_context || settings.authn_context_decl_ref
-
-          if settings.authn_context_comparison != nil
-            comparison = settings.authn_context_comparison
-          else
-            comparison = 'exact'
-          end
-
+        if requested_context_constraints
           requested_context = root.add_element "samlp:RequestedAuthnContext", {
-            "Comparison" => comparison,
+            "Comparison" => requested_context_constraints.comparison,
           }
 
-          if settings.authn_context != nil
-            authn_contexts_class_ref = settings.authn_context.is_a?(Array) ? settings.authn_context : [settings.authn_context]
-            authn_contexts_class_ref.each do |authn_context_class_ref|
-              class_ref = requested_context.add_element "saml:AuthnContextClassRef"
-              class_ref.text = authn_context_class_ref
-            end
+          requested_context_constraints.class_refs.each do |class_ref_constraint|
+            class_ref = requested_context.add_element "saml:AuthnContextClassRef"
+            class_ref.text = class_ref_constraint.value
           end
 
-          if settings.authn_context_decl_ref != nil
-            authn_contexts_decl_refs = settings.authn_context_decl_ref.is_a?(Array) ? settings.authn_context_decl_ref : [settings.authn_context_decl_ref]
-            authn_contexts_decl_refs.each do |authn_context_decl_ref|
-              decl_ref = requested_context.add_element "saml:AuthnContextDeclRef"
-              decl_ref.text = authn_context_decl_ref
-            end
+          requested_context_constraints.decl_refs.each do |decl_ref_constraint|
+            decl_ref = requested_context.add_element "saml:AuthnContextDeclRef"
+            decl_ref.text = decl_ref_constraint.value
           end
         end
 

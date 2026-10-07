@@ -240,6 +240,22 @@ class RequestTest < Minitest::Test
       assert_match(/<saml:AuthnContextDeclRef>urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport<\/saml:AuthnContextDeclRef>/, auth_doc.to_s)
     end
 
+    it "binds requested authentication context candidates to the AuthnRequest ID" do
+      settings.authn_context = ["urn:example:base", "urn:example:left"]
+      settings.authn_context_decl_ref = "urn:example:decl"
+      settings.authn_context_comparison = "minimum"
+      authrequest = OneLogin::RubySaml::Authrequest.new
+
+      constraint = authrequest.requested_authn_context(settings)
+      auth_doc = authrequest.create_authentication_xml_doc(settings)
+
+      assert_equal authrequest.request_id, constraint.request_id
+      assert_equal "minimum", constraint.comparison
+      assert_equal ["urn:example:base", "urn:example:left"], constraint.class_refs.map(&:value)
+      assert_equal ["urn:example:decl"], constraint.decl_refs.map(&:value)
+      assert_match(/<samlp:RequestedAuthnContext[\S ]+Comparison='minimum'/, auth_doc.to_s)
+    end
+
     describe "#create_params signing with HTTP-POST binding" do
       before do
         settings.compress_request = false

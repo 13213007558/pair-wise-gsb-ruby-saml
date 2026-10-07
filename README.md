@@ -588,6 +588,40 @@ pp(response.attributes.fetch(/givenname/))
 The `saml:AuthnContextClassRef` of the AuthNRequest can be provided by `settings.authn_context`; possible values are described at [SAMLAuthnCxt]. The comparison method can be set using `settings.authn_context_comparison` parameter. Possible values include: 'exact', 'better', 'maximum' and 'minimum' (default value is 'exact').
 To add a `saml:AuthnContextDeclRef`, define `settings.authn_context_decl_ref`.
 
+A valid response signature does not prove that its `AuthnContext` satisfies the `RequestedAuthnContext`. When using
+`minimum`, `maximum`, or `better`, register the auditable partial order used by your deployment. Authentication context
+URIs have no universal numeric ranking, so unknown and incomparable contexts are rejected unless the requested comparison
+can be satisfied through an explicitly registered path.
+
+```ruby
+settings.authn_context_comparison = "minimum"
+settings.authn_context = "urn:example:weak"
+settings.authn_context_ordering = OneLogin::RubySaml::AuthnContextOrdering.new([
+  ["urn:example:weak", "urn:example:strong"],
+  ["urn:example:strong", "urn:example:stronger"]
+])
+```
+
+For response validation, bind the response to the request that initiated it. The constraint returned by
+`authrequest.requested_authn_context(settings)` includes the request ID and every class/declaration reference sent in
+the request. On success, `response.authn_context_matches` contains the actual reference, the satisfied candidate, the
+request ID, and the ordered comparison path.
+
+```ruby
+authrequest = OneLogin::RubySaml::Authrequest.new
+requested_authn_context = authrequest.requested_authn_context(saml_settings)
+session[:saml_requested_authn_context] = requested_authn_context if requested_authn_context
+redirect_to(authrequest.create(saml_settings))
+
+requested_authn_context = session.delete(:saml_requested_authn_context)
+response = OneLogin::RubySaml::Response.new(
+  params[:SAMLResponse],
+  settings: saml_settings,
+  requested_authn_context: requested_authn_context,
+  authn_context_ordering: saml_settings.authn_context_ordering
+)
+```
+
 In a SP-initiated flow, the SP can indicate to the IdP the subject that should be authenticated. This is done by defining the `settings.name_identifier_value_requested` before
 building the authrequest object.
 
@@ -1085,7 +1119,7 @@ def consume
   request_id = session.delete(:saml_request_id) # Use delete to prevent re-use
 
   # You can reject the response if no previous saml_request_id was stored
-  raise "IdP-initiaited detected" if request_id.nil?
+  raise "IdP-initiated detected" if request_id.nil?
 
   response = OneLogin::RubySaml::Response.new(
     params[:SAMLResponse],
@@ -1100,6 +1134,10 @@ def consume
   end
 end
 ```
+
+If the application can accept IdP-initiated login, omit the stored request ID or do not pass `matches_request_id`.
+Pass `allow_idp_initiated: false` to reject a response that is not bound to a request registered by this SP; a non-empty
+`InResponseTo` value supplied by the IdP is not sufficient on its own.
 
 ## Contributing
 

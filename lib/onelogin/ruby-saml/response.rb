@@ -22,6 +22,8 @@ module OneLogin
         "a" => ASSERTION
       }.freeze
 
+      ConstraintBinding = Struct.new(:request_id, :requested_authn_context)
+
       # TODO: Settings should probably be initialized too... WDYT?
 
       # OneLogin::RubySaml::Settings Toolkit settings
@@ -31,6 +33,7 @@ module OneLogin
       attr_reader :decrypted_document
       attr_reader :response
       attr_reader :options
+      attr_reader :authn_context_matches
 
       attr_accessor :soft
 
@@ -38,8 +41,12 @@ module OneLogin
       # This is not a whitelist to allow people extending OneLogin::RubySaml:Response
       # and pass custom options
       AVAILABLE_OPTIONS = [
-        :allowed_clock_drift, :check_duplicated_attributes, :matches_request_id, :settings, :skip_audience, :skip_authnstatement, :skip_conditions,
-        :skip_destination, :skip_recipient_check, :skip_subject_confirmation
+        :allow_idp_initiated, :allow_unsolicited, :allow_unsolicited_response,
+        :allowed_clock_drift, :authn_context_ordering,
+        :authn_request, :check_duplicated_attributes, :matches_request_id,
+        :request, :requested_authn_context, :settings, :skip_audience,
+        :skip_authnstatement, :skip_conditions, :skip_destination,
+        :skip_recipient_check, :skip_subject_confirmation
       ]
       # TODO: Update the comment on initialize to describe every option
 
@@ -49,6 +56,8 @@ module OneLogin
       #                          Or some options for the response validation process like skip the conditions validation
       #                          with the :skip_conditions, or allow a clock_drift when checking dates with :allowed_clock_drift
       #                          or :matches_request_id that will validate that the response matches the ID of the request,
+      #                          or :requested_authn_context that validates RequestedAuthnContext and binds it to the request ID,
+      #                          or :allow_idp_initiated to reject responses without an SP-initiated request,
       #                          or skip the subject confirmation validation with the :skip_subject_confirmation option
       #                          or skip the recipient validation of the subject confirmation element with :skip_recipient_check option
       #                          or skip the audience validation with :skip_audience option
@@ -82,7 +91,6 @@ module OneLogin
       def is_valid?(collect_errors = false)
         validate(collect_errors)
       end
-
       # @return [String] the NameID provided by the SAML response from the IdP.
       #
       def name_id
@@ -221,6 +229,46 @@ module OneLogin
       #
       def authn_context_class_ref
         @authn_context_class_ref ||= Utils.element_text(xpath_first_from_signed_assertion('/a:AuthnStatement/a:AuthnContext/a:AuthnContextClassRef'))
+      end
+
+      # @return [String] AuthnContextDeclRef value
+      #
+      def authn_context_decl_ref
+        @authn_context_decl_ref ||= Utils.element_text(xpath_first_from_signed_assertion('/a:AuthnStatement/a:AuthnContext/a:AuthnContextDeclRef'))
+      end
+
+      # @return [Array<OneLogin::RubySaml::ActualAuthnContext>] Authentication context references from signed AuthnStatement elements.
+      #
+      def authn_context_refs
+        @authn_context_refs ||= begin
+          xpath_from_signed_assertion('/a:AuthnStatement').each_with_index.flat_map do |statement, statement_index|
+            context_node = REXML::XPath.first(statement, './a:AuthnContext', SAML_NAMESPACES)
+            next [] unless context_node
+
+            statement_id = statement.attributes['ID'] if statement.attributes
+            refs = []
+
+            REXML::XPath.match(context_node, './a:AuthnContextClassRef', SAML_NAMESPACES).each do |node|
+              value = Utils.element_text(node)
+              refs << ActualAuthnContext.new(
+                ref: AuthnContextRef.new(AuthnContextOrdering::CLASS_REF, value),
+                authn_statement_id: statement_id,
+                authn_statement_index: statement_index
+              ) if value
+            end
+
+            REXML::XPath.match(context_node, './a:AuthnContextDeclRef', SAML_NAMESPACES).each do |node|
+              value = Utils.element_text(node)
+              refs << ActualAuthnContext.new(
+                ref: AuthnContextRef.new(AuthnContextOrdering::DECL_REF, value),
+                authn_statement_id: statement_id,
+                authn_statement_index: statement_index
+              ) if value
+            end
+
+            refs
+          end
+        end
       end
 
       # Checks if the Status has the "Success" code
@@ -398,6 +446,7 @@ module OneLogin
       #
       def validate(collect_errors = false)
         reset_errors!
+        @authn_context_matches = nil
         return false unless validate_response_state
 
         validations = [
@@ -409,6 +458,7 @@ module OneLogin
           :validate_structure,
           :validate_no_duplicated_attributes,
           :validate_in_response_to,
+          :validate_requested_authn_context,
           :validate_one_conditions,
           :validate_conditions,
           :validate_one_authnstatement,
@@ -624,12 +674,125 @@ module OneLogin
       # @raise [ValidationError] if soft == false and validation fails
       #
       def validate_in_response_to
-        return true unless options.has_key? :matches_request_id
-        return true if options[:matches_request_id].nil?
-        return true unless options[:matches_request_id] != in_response_to
+        bound = bound_request
+        expected_id = bound && bound.request_id
+        expected_id = options[:matches_request_id] if expected_id.nil? && options.has_key?(:matches_request_id)
 
-        error_msg = "The InResponseTo of the Response: #{in_response_to}, does not match the ID of the AuthNRequest sent by the SP: #{options[:matches_request_id]}"
-        append_error(error_msg)
+        if expected_id
+          return true if expected_id == in_response_to
+
+          error_msg = "The InResponseTo of the Response: #{in_response_to}, does not match the ID of the AuthNRequest sent by the SP: #{expected_id}"
+          return append_error(error_msg)
+        end
+
+        return true unless reject_idp_initiated?
+
+        append_error("The Response was not sent in response to a registered AuthnRequest and unsolicited responses are not allowed")
+      end
+
+      # Validates the authentication context supplied by the assertion against the requested context.
+      # @return [Boolean] True if every AuthnStatement satisfies the requested exact, minimum, maximum, or better rule.
+      #
+      def validate_requested_authn_context
+        constraint = requested_authn_context_constraint
+        return true unless constraint && constraint.present?
+
+        unless constraint.request_id.nil? || constraint.request_id == in_response_to
+          @authn_context_matches = []
+          return append_error("The InResponseTo of the Response: #{in_response_to}, does not match the ID of the AuthNRequest sent by the SP: #{constraint.request_id}")
+        end
+
+        actual_contexts = authn_context_refs
+        if actual_contexts.empty?
+          @authn_context_matches = []
+          return append_error("The Assertion must include an AuthnContextClassRef or AuthnContextDeclRef satisfying the RequestedAuthnContext")
+        end
+
+        matches = constraint.match(actual_contexts, authn_context_ordering)
+        @authn_context_matches = matches
+
+        return true if matches.length == actual_contexts.length
+
+        actual_values = actual_contexts.map(&:value).join(", ")
+        candidate_values = constraint.candidates.map(&:value).join(", ")
+        append_error("AuthnContext #{actual_values} does not satisfy the #{constraint.comparison} RequestedAuthnContext candidates: #{candidate_values}")
+      end
+
+      def bound_request
+        request = options[:request]
+        request = options[:authn_request] if request.nil? && options.has_key?(:authn_request)
+        return if request.nil?
+
+        if request.respond_to?(:requested_authn_context)
+          ConstraintBinding.new(request.request_id, request.requested_authn_context(settings))
+        elsif request.respond_to?(:request_id)
+          constraint = request.respond_to?(:candidates) && !request.respond_to?(:requested_authn_context) ? request : nil
+          ConstraintBinding.new(request.request_id, constraint)
+        end
+      end
+
+      def requested_authn_context_constraint
+        bound = bound_request
+        bound_constraint = bound && bound.requested_authn_context
+        provided_constraint = normalize_requested_authn_context(options[:requested_authn_context])
+
+        if bound && provided_constraint && bound.request_id && provided_constraint.request_id &&
+           bound.request_id != provided_constraint.request_id
+          raise ArgumentError.new("The RequestedAuthnContext option does not match the bound request constraints")
+        end
+        if bound_constraint && provided_constraint &&
+           (bound_constraint.comparison != provided_constraint.comparison ||
+            bound_constraint.candidates != provided_constraint.candidates)
+          raise ArgumentError.new("The RequestedAuthnContext option does not match the bound request constraints")
+        end
+
+        if bound && options[:matches_request_id] && bound.request_id &&
+           bound.request_id != options[:matches_request_id]
+          raise ArgumentError.new("The provided matches_request_id does not match the bound request ID")
+        end
+
+        constraint = normalize_requested_authn_context(bound_constraint) || provided_constraint
+        if bound && constraint && constraint.request_id.nil?
+          constraint = RequestedAuthnContext.new(
+            request_id: bound.request_id,
+            comparison: constraint.comparison,
+            class_refs: constraint.class_refs,
+            decl_refs: constraint.decl_refs
+          )
+        end
+
+        constraint
+      end
+
+      def normalize_requested_authn_context(value)
+        return if value.nil?
+        return value if value.is_a?(RequestedAuthnContext)
+
+        attributes = value
+        request_id = option_value(attributes, :request_id)
+        comparison = option_value(attributes, :comparison)
+        class_refs = option_value(attributes, :class_refs) || option_value(attributes, :authn_context_class_refs)
+        decl_refs = option_value(attributes, :decl_refs) || option_value(attributes, :authn_context_decl_refs)
+
+        RequestedAuthnContext.new(
+          request_id: request_id,
+          comparison: comparison,
+          class_refs: class_refs,
+          decl_refs: decl_refs
+        )
+      end
+
+      def option_value(value, key)
+        value[key] || value[key.to_s] if value.respond_to?(:[])
+      end
+
+      def reject_idp_initiated?
+        [options[:allow_idp_initiated], options[:allow_unsolicited], options[:allow_unsolicited_response]].any? { |value| value == false }
+      end
+
+      def authn_context_ordering
+        ordering = options[:authn_context_ordering] || settings.authn_context_ordering
+        ordering || AuthnContextOrdering.new
       end
 
       # Validates the Audience, (If the Audience match the Service Provider EntityID)

@@ -693,6 +693,29 @@ class RubySamlTest < Minitest::Test
         assert !response.send(:validate_in_response_to)
         assert_includes response.errors, "The InResponseTo of the Response: _fc4a34b0-7efb-012e-caae-782bcb13bb38, does not match the ID of the AuthNRequest sent by the SP: invalid_request_id"
       end
+
+      it "binds a response without requested authentication context to the AuthnRequest ID" do
+        authrequest = OneLogin::RubySaml::Authrequest.new
+        authrequest.instance_variable_set(:@uuid, "_fc4a34b0-7efb-012e-caae-782bcb13bb38")
+        response = OneLogin::RubySaml::Response.new(
+          response_document_valid_signed,
+          :settings => settings,
+          :request => authrequest
+        )
+
+        assert response.send(:validate_in_response_to)
+      end
+
+      it "does not trust a non-empty InResponseTo when unsolicited responses are rejected" do
+        response = OneLogin::RubySaml::Response.new(
+          response_document_valid_signed,
+          :settings => settings,
+          :allow_idp_initiated => false
+        )
+
+        assert !response.send(:validate_in_response_to)
+        assert_includes response.errors, "The Response was not sent in response to a registered AuthnRequest and unsolicited responses are not allowed"
+      end
     end
 
     describe "#validate_audience" do
@@ -1370,6 +1393,153 @@ class RubySamlTest < Minitest::Test
     describe "#authn_context_class_ref" do
       it "extract the value of the AuthnContextClassRef attribute" do
         assert_equal "urn:oasis:names:tc:SAML:2.0:ac:classes:Password", response.authn_context_class_ref
+      end
+    end
+
+    describe "#authn_context_decl_ref" do
+      it "extracts the value of the AuthnContextDeclRef element" do
+        xml = OneLogin::RubySaml::Response.new(response_document_valid_signed).response.sub(
+          /<saml:AuthnContextClassRef>.*?<\/saml:AuthnContextClassRef>/,
+          "<saml:AuthnContextDeclRef>urn:example:decl</saml:AuthnContextDeclRef>"
+        )
+        signed_response = OneLogin::RubySaml::Response.new(xml, :settings => settings)
+
+        assert_equal "urn:example:decl", signed_response.authn_context_decl_ref
+      end
+    end
+
+    describe "#validate_requested_authn_context" do
+      let(:password) { "urn:oasis:names:tc:SAML:2.0:ac:classes:Password" }
+      let(:password_protected_transport) { "urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport" }
+      let(:request_id) { "_fc4a34b0-7efb-012e-caae-782bcb13bb38" }
+      let(:ordering) do
+        OneLogin::RubySaml::AuthnContextOrdering.new([
+          [password, password_protected_transport]
+        ])
+      end
+
+      def authn_response(options = {})
+        OneLogin::RubySaml::Response.new(
+          response_document_valid_signed,
+          {
+            :settings => settings,
+            :authn_context_ordering => ordering
+          }.merge(options)
+        )
+      end
+
+      it "accepts an exact class reference and returns the bound match details" do
+        constraint = OneLogin::RubySaml::RequestedAuthnContext.new(
+          request_id: request_id,
+          comparison: "exact",
+          class_refs: [password_protected_transport]
+        )
+        response = authn_response(:requested_authn_context => constraint)
+
+        assert response.send(:validate_requested_authn_context)
+        match = response.authn_context_matches.first
+        assert_equal request_id, match.request_id
+        assert_equal 0, match.authn_statement_index
+        assert_equal password_protected_transport, match.actual.value
+        assert_equal password_protected_transport, match.candidate.value
+        assert_equal [password_protected_transport], match.path.map(&:value)
+      end
+
+      it "accepts a stronger minimum class reference using the configured partial order" do
+        constraint = OneLogin::RubySaml::RequestedAuthnContext.new(
+          request_id: request_id,
+          comparison: "minimum",
+          class_refs: [password]
+        )
+        response = authn_response(:requested_authn_context => constraint)
+
+        assert response.send(:validate_requested_authn_context)
+        match = response.authn_context_matches.first
+        assert_equal [password, password_protected_transport], match.path.map(&:value)
+      end
+
+      it "rejects an incomparable class reference" do
+        constraint = OneLogin::RubySaml::RequestedAuthnContext.new(
+          request_id: request_id,
+          comparison: "minimum",
+          class_refs: ["urn:example:incomparable"]
+        )
+        response = authn_response(:requested_authn_context => constraint)
+
+        refute response.send(:validate_requested_authn_context)
+        assert_match(/does not satisfy the minimum RequestedAuthnContext/, response.errors.first)
+      end
+
+      it "compares declaration references independently from class references" do
+        signed_document = OneLogin::RubySaml::Response.new(response_document_valid_signed).response.sub(
+          /<saml:AuthnContextClassRef>.*?<\/saml:AuthnContextClassRef>/,
+          "<saml:AuthnContextDeclRef>urn:example:strong-decl</saml:AuthnContextDeclRef>"
+        )
+        constraint = OneLogin::RubySaml::RequestedAuthnContext.new(
+          request_id: request_id,
+          comparison: "minimum",
+          decl_refs: ["urn:example:weak-decl"]
+        )
+        decl_ordering = OneLogin::RubySaml::AuthnContextOrdering.new([
+          [
+            OneLogin::RubySaml::AuthnContextRef.new(OneLogin::RubySaml::AuthnContextOrdering::DECL_REF, "urn:example:weak-decl"),
+            OneLogin::RubySaml::AuthnContextRef.new(OneLogin::RubySaml::AuthnContextOrdering::DECL_REF, "urn:example:strong-decl")
+          ]
+        ])
+        response = OneLogin::RubySaml::Response.new(
+          signed_document,
+          :settings => settings,
+          :authn_context_ordering => decl_ordering,
+          :requested_authn_context => constraint
+        )
+
+        assert response.send(:validate_requested_authn_context)
+        assert_equal "decl_ref", response.authn_context_matches.first.actual.type
+        assert_equal ["urn:example:weak-decl", "urn:example:strong-decl"],
+                     response.authn_context_matches.first.path.map(&:value)
+      end
+
+      it "still enforces requested context when AuthnStatement presence validation is skipped" do
+        constraint = OneLogin::RubySaml::RequestedAuthnContext.new(
+          request_id: request_id,
+          comparison: "exact",
+          class_refs: ["urn:example:missing"]
+        )
+        response = authn_response(
+          :requested_authn_context => constraint,
+          :skip_authnstatement => true
+        )
+
+        refute response.send(:validate_requested_authn_context)
+      end
+
+      it "binds an explicitly provided context to a request without context constraints" do
+        authrequest = OneLogin::RubySaml::Authrequest.new
+        authrequest.instance_variable_set(:@uuid, request_id)
+        constraint = OneLogin::RubySaml::RequestedAuthnContext.new(
+          request_id: request_id,
+          comparison: "exact",
+          class_refs: [password_protected_transport]
+        )
+        response = authn_response(
+          :request => authrequest,
+          :requested_authn_context => constraint
+        )
+
+        assert response.send(:validate_requested_authn_context)
+        assert_equal request_id, response.authn_context_matches.first.request_id
+      end
+
+      it "rejects a response missing an actual authentication context reference" do
+        constraint = OneLogin::RubySaml::RequestedAuthnContext.new(
+          request_id: request_id,
+          comparison: "exact",
+          class_refs: [password_protected_transport]
+        )
+        response = authn_response(:requested_authn_context => constraint)
+        response.stubs(:authn_context_refs).returns([])
+
+        refute response.send(:validate_requested_authn_context)
       end
     end
 
