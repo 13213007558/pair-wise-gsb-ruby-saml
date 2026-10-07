@@ -1,0 +1,7 @@
+<samlp:ManageNameIDResponse xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="_mnid-response-terminate-001" Version="2.0" IssueInstant="2026-10-07T10:05:05Z" InResponseTo="_mnid-request-terminate-001" Destination="https://sp.example.com/saml/manage-name-id">
+  <saml:Issuer>https://idp.example.com/</saml:Issuer>
+  <samlp:Status>
+    <samlp:StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success"/>
+    <samlp:StatusMessage>NameID terminated</samlp:StatusMessage>
+  </samlp:Status>
+</samlp:ManageNameIDResponse>

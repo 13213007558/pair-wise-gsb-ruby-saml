@@ -40,6 +40,7 @@ module OneLogin
       attr_accessor :idp_cert_multi
       attr_accessor :idp_attribute_names
       attr_accessor :idp_name_qualifier
+      attr_accessor :idp_manage_name_id_service_url
       attr_accessor :valid_until
       # SP Data
       attr_writer   :sp_entity_id
@@ -289,6 +290,8 @@ module OneLogin
           :authn_requests_signed      => false,
           :logout_requests_signed     => false,
           :logout_responses_signed    => false,
+          :manage_name_id_requests_signed => false,
+          :want_manage_name_id_responses_signed => false,
           :want_assertions_signed     => false,
           :want_assertions_encrypted  => false,
           :want_name_id               => false,
@@ -383,4 +386,3 @@ module OneLogin
     end
   end
 end
-

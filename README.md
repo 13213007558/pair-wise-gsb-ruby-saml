@@ -915,6 +915,65 @@ def logout
 end
 ```
 
+## Manage NameID
+
+Ruby SAML supports the SAML 2.0 ManageNameID profile, which lets a Service
+Provider ask the Identity Provider to rename or terminate the identifier of a
+user. Changing the identifier of a user in the federated system is not a new
+login and does not remove the local account: the local change is committed
+through a callback that you provide. The first version of this support only
+implements the SOAP binding.
+
+The old identifier is described by a `OneLogin::RubySaml::NameIdentifier`
+object. Its `Format`, `NameQualifier` and `SPNameQualifier` attributes are
+part of the identity, so all of them are sent on the request and used when
+matching records. Exactly one of `:new_id`, `:new_encrypted_id` or
+`:terminate` must be provided, they are mutually exclusive choices.
+
+```ruby
+settings.idp_manage_name_id_service_url = "https://idp.example.com/manage-name-id"
+
+old_identifier = OneLogin::RubySaml::NameIdentifier.new(
+  "old.user@example.com",
+  :format => "urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress",
+  :name_qualifier => "https://idp.example.com/",
+  :sp_name_qualifier => "https://sp.example.com/saml/metadata"
+)
+
+service = OneLogin::RubySaml::ManageNameIdService.new(
+  settings,
+  :store => my_record_store, # responds to read(key) / write(key, record)
+  :commit => lambda { |change| Account.rename_identifier(change[:name_identifier], change[:new_id]) }
+)
+
+result = service.execute(:name_identifier => old_identifier, :new_id => "new.user@example.com")
+# or service.execute(:name_identifier => old_identifier, :terminate => true)
+```
+
+The service builds and signs the `ManageNameIDRequest` (when
+`security[:manage_name_id_requests_signed]` is enabled), sends it inside a
+SOAP envelope, and validates the `ManageNameIDResponse` (issuer, `InResponseTo`
+correlation, target identity and signature) before invoking the local `:commit`
+callback. Login (`Response`) and logout (`LogoutResponse`) documents or
+objects cannot be used to impersonate a ManageNameID response.
+
+The returned `OneLogin::RubySaml::ManageNameIdResult` distinguishes the
+possible outcomes:
+
+- `:success` the IdP applied the change and the local commit succeeded.
+- `:duplicate` the operation was already recorded on the store; the recorded
+  outcome is replayed and nothing is sent nor committed again.
+- `:transport_error` the request could not be sent; the remote state is unknown.
+- `:invalid_response` the response failed validation; the remote state is unknown.
+- `:denied` the IdP answered a non Success status; the remote change was not applied.
+- `:commit_failed` the IdP applied the change but the local commit failed.
+  The remote change was NOT rolled back, reconcile it with the recorded
+  `request_id`.
+
+Duplicated operations are detected through the record store injected with the
+`:store` option (an in-memory store is used by default). Persisting those
+records makes the handling of repeated requests stably reproducible.
+
 ## Clock Drift
 
 Server clocks tend to drift naturally. If during validation of the response you get the error "Current time is earlier than NotBefore condition", this may be due to clock differences between your system and that of the Identity Provider.
