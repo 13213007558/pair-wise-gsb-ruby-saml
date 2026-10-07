@@ -1,5 +1,8 @@
 # Ruby SAML Changelog
 
+### Unreleased
+* Add HTTP Artifact binding support (receiver side): parse type 0x0004 artifacts, resolve them through the IdP Artifact Resolution Service with an injectable SOAP transport, validate the ArtifactResponse (InResponseTo, Issuer, Status, Signature) and hand the inner message to the Response validation chain. One-time-use semantics enforced by a pluggable artifact store.
+
 ### 1.18.1  (Jul 29, 2025)
 * Fix vulnerability CVE-2025-54572 Prevent DOS due large SAML Message
 * Adapt tests to be able to execute signature validation sooner

@@ -239,6 +239,8 @@ module OneLogin
             :idp_slo_service_url => single_logout_service_url(slo_binding),
             :idp_slo_service_binding => single_logout_service_binding(slo_binding),
             :idp_slo_response_service_url => single_logout_response_service_url(slo_binding),
+            :idp_artifact_resolution_service_url => artifact_resolution_service_url,
+            :idp_artifact_resolution_services => artifact_resolution_services,
             :idp_attribute_names => attribute_names,
             :idp_cert => nil,
             :idp_cert_fingerprint => nil,
@@ -343,6 +345,41 @@ module OneLogin
             SamlMetadata::NAMESPACE
           )
           node.value if node
+        end
+
+        # @return [Array<Hash>] ArtifactResolutionService endpoints if exist,
+        #   each one with its :index, :binding and :location
+        #
+        def artifact_resolution_services
+          nodes = REXML::XPath.match(
+            @idpsso_descriptor,
+            "md:ArtifactResolutionService",
+            SamlMetadata::NAMESPACE
+          )
+          nodes.map do |node|
+            {
+              :index => node.attributes['index'].to_i,
+              :binding => node.attributes['Binding'],
+              :location => node.attributes['Location']
+            }
+          end
+        end
+
+        # @return [String|nil] Location of the default ArtifactResolutionService
+        #   endpoint (the one flagged with isDefault="true", or the first one)
+        #
+        def artifact_resolution_service_url
+          services = artifact_resolution_services
+          return nil if services.empty?
+
+          default_node = REXML::XPath.first(
+            @idpsso_descriptor,
+            "md:ArtifactResolutionService[@isDefault=\"true\"]/@Location",
+            SamlMetadata::NAMESPACE
+          )
+          return default_node.value if default_node
+
+          services.first[:location]
         end
 
         # @return [String|nil] Unformatted Certificate if exists

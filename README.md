@@ -298,6 +298,59 @@ class SamlController < ApplicationController
 end
 ```
 
+## HTTP Artifact Binding
+
+Some IdPs answer the authentication request with a redirect that carries a
+`SAMLart` parameter instead of POSTing the `SAMLResponse`. The artifact is an
+opaque token (type `0x0004`: EndpointIndex, SourceID and MessageHandle); it is
+never a URL and never contains the message itself. Use
+`OneLogin::RubySaml::ArtifactResolver` on the callback to resolve it:
+
+```ruby
+def consume
+  resolver = OneLogin::RubySaml::ArtifactResolver.new(
+    saml_settings,
+    :artifact_store => Rails.cache, # any store implementing consume(key)/release(key)
+    :matches_request_id => session.delete(:saml_request_id)
+  )
+
+  begin
+    response = resolver.resolve(params[:SAMLart])
+  rescue OneLogin::RubySaml::ArtifactTransportError
+    # the IdP could not be reached, the artifact was not consumed: retry is allowed
+    raise
+  rescue OneLogin::RubySaml::ArtifactReplayError
+    # the artifact was already consumed (one-time-use): never retry
+    raise
+  end
+
+  if response.is_valid?
+    session[:userid] = response.nameid
+  else
+    # the artifact was resolved but the inner response is invalid.
+    # The artifact stays consumed: do not retry.
+    authorize_failure
+  end
+end
+```
+
+The resolver parses the artifact, verifies that its SourceID matches the SHA-1
+of the trusted `idp_entity_id`, selects the `ArtifactResolutionService` endpoint
+from the trusted IdP metadata (`idp_artifact_resolution_services`, keyed by the
+artifact EndpointIndex, or `idp_artifact_resolution_service_url`), and sends an
+`ArtifactResolve` request through a SOAP transport. The returned
+`ArtifactResponse` is validated (InResponseTo, Issuer, Status and Signature)
+and the inner message is handed to the standard
+`OneLogin::RubySaml::Response` validation chain.
+
+The SOAP transport can be injected with the `:soap_transport` option (any
+object responding to `call(url, soap_envelope)`), which is how tests replace
+the network. The one-time-use semantics are enforced by the `:artifact_store`
+option; its `consume` operation must be atomic so concurrent resolutions of
+the same artifact are rejected. A thread safe in-memory store
+(`OneLogin::RubySaml::ArtifactStore::Memory`) is used by default; use a shared
+store in multi-process deployments.
+
 ## Signature Validation
 
 Ruby SAML allows different ways to validate the signature of the SAMLResponse:
@@ -365,6 +418,8 @@ The following attributes are set:
   * name_identifier_format
   * idp_sso_service_url
   * idp_slo_service_url
+  * idp_artifact_resolution_service_url
+  * idp_artifact_resolution_services
   * idp_attribute_names
   * idp_cert
   * idp_cert_fingerprint
