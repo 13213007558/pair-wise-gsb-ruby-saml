@@ -1,5 +1,6 @@
 require "xml_security"
 require "onelogin/ruby-saml/attributes"
+require "onelogin/ruby-saml/requested_authn_context"
 
 require "time"
 require "nokogiri"
@@ -31,6 +32,7 @@ module OneLogin
       attr_reader :decrypted_document
       attr_reader :response
       attr_reader :options
+      attr_reader :authn_context_match
 
       attr_accessor :soft
 
@@ -38,8 +40,9 @@ module OneLogin
       # This is not a whitelist to allow people extending OneLogin::RubySaml:Response
       # and pass custom options
       AVAILABLE_OPTIONS = [
-        :allowed_clock_drift, :check_duplicated_attributes, :matches_request_id, :settings, :skip_audience, :skip_authnstatement, :skip_conditions,
-        :skip_destination, :skip_recipient_check, :skip_subject_confirmation
+        :allow_unsolicited_response, :allowed_clock_drift, :check_duplicated_attributes,
+        :matches_request_id, :requested_authn_context, :requested_authn_contexts, :settings, :skip_audience,
+        :skip_authnstatement, :skip_conditions, :skip_destination, :skip_recipient_check, :skip_subject_confirmation
       ]
       # TODO: Update the comment on initialize to describe every option
 
@@ -49,6 +52,8 @@ module OneLogin
       #                          Or some options for the response validation process like skip the conditions validation
       #                          with the :skip_conditions, or allow a clock_drift when checking dates with :allowed_clock_drift
       #                          or :matches_request_id that will validate that the response matches the ID of the request,
+      #                          or :requested_authn_context(s) to validate the AuthnContext against request constraints,
+      #                          or :allow_unsolicited_response to control responses without InResponseTo,
       #                          or skip the subject confirmation validation with the :skip_subject_confirmation option
       #                          or skip the recipient validation of the subject confirmation element with :skip_recipient_check option
       #                          or skip the audience validation with :skip_audience option
@@ -221,6 +226,31 @@ module OneLogin
       #
       def authn_context_class_ref
         @authn_context_class_ref ||= Utils.element_text(xpath_first_from_signed_assertion('/a:AuthnStatement/a:AuthnContext/a:AuthnContextClassRef'))
+      end
+
+      # Gets the AuthnContextDeclRef from the AuthnStatement
+      # @return [String] AuthnContextDeclRef value
+      #
+      def authn_context_decl_ref
+        @authn_context_decl_ref ||= Utils.element_text(xpath_first_from_signed_assertion('/a:AuthnStatement/a:AuthnContext/a:AuthnContextDeclRef'))
+      end
+
+      # Gets the authentication context from the signed assertion.
+      # @return [AuthnContextReference|nil] Actual authentication context
+      #
+      def authn_context
+        @authn_context ||= begin
+          class_ref = authn_context_class_ref
+          decl_ref = authn_context_decl_ref
+
+          if present?(class_ref) && present?(decl_ref)
+            nil
+          elsif present?(class_ref)
+            AuthnContextReference.new(:class_ref, class_ref)
+          elsif present?(decl_ref)
+            AuthnContextReference.new(:decl_ref, decl_ref)
+          end
+        end
       end
 
       # Checks if the Status has the "Success" code
@@ -398,6 +428,7 @@ module OneLogin
       #
       def validate(collect_errors = false)
         reset_errors!
+        @authn_context_match = nil
         return false unless validate_response_state
 
         validations = [
@@ -412,6 +443,7 @@ module OneLogin
           :validate_one_conditions,
           :validate_conditions,
           :validate_one_authnstatement,
+          :validate_requested_authn_context,
           :validate_audience,
           :validate_destination,
           :validate_issuer,
@@ -632,6 +664,33 @@ module OneLogin
         append_error(error_msg)
       end
 
+      # Validates the assertion AuthnContext against the requested constraints.
+      # @return [Boolean] True if the context satisfies the request, otherwise False if soft=True
+      # @raise [ValidationError] if soft == false and validation fails
+      #
+      def validate_requested_authn_context
+        requested_context = select_requested_authn_context
+        return false unless @errors.empty?
+        return true if requested_context.nil?
+
+        actual_context = authn_context
+        if actual_context.nil?
+          class_ref_nodes = xpath_from_signed_assertion('/a:AuthnStatement/a:AuthnContext/a:AuthnContextClassRef')
+          decl_ref_nodes = xpath_from_signed_assertion('/a:AuthnStatement/a:AuthnContext/a:AuthnContextDeclRef')
+          if class_ref_nodes.size + decl_ref_nodes.size > 1
+            return append_error("The AuthnContext must contain exactly one AuthnContextClassRef or AuthnContextDeclRef")
+          end
+          return append_error("The AuthnContext is missing or empty")
+        end
+
+        @authn_context_match = requested_context.match(actual_context)
+        if @authn_context_match.nil?
+          return append_error("The AuthnContext #{actual_context.value} does not satisfy the requested #{requested_context.comparison} authentication context")
+        end
+
+        true
+      end
+
       # Validates the Audience, (If the Audience match the Service Provider EntityID)
       # If the response was initialized with the :skip_audience option, this validation is skipped,
       # If fails, the error is added to the errors array
@@ -845,6 +904,43 @@ module OneLogin
         end
 
         true
+      end
+
+      def select_requested_authn_context
+        contexts = requested_authn_contexts
+        return nil if contexts.empty?
+
+        matching_contexts = contexts.select { |context| !context.request_id.nil? && context.request_id == in_response_to }
+        if matching_contexts.size > 1
+          append_error("Multiple requested authentication contexts were registered for the Response InResponseTo #{in_response_to}")
+          return nil
+        end
+        return matching_contexts.first if matching_contexts.size == 1
+
+        if in_response_to.nil? && options[:allow_unsolicited_response]
+          unsolicited_contexts = contexts.select { |requested_context| requested_context.request_id.nil? }
+          if unsolicited_contexts.size > 1
+            append_error("Multiple requested authentication contexts were registered for a response without InResponseTo")
+            nil
+          else
+            unsolicited_contexts.first
+          end
+        elsif in_response_to.nil?
+          append_error("A response without InResponseTo was rejected because unsolicited responses are not allowed")
+        else
+          append_error("No requested authentication context found for the Response InResponseTo #{in_response_to}")
+          nil
+        end
+      end
+
+      def requested_authn_contexts
+        contexts = Array(options[:requested_authn_contexts]).dup
+        contexts << options[:requested_authn_context] unless options[:requested_authn_context].nil?
+        contexts
+      end
+
+      def present?(value)
+        !value.nil? && !value.to_s.strip.empty?
       end
 
       def doc_to_validate

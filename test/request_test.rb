@@ -430,6 +430,21 @@ class RequestTest < Minitest::Test
       assert auth_doc.to_s =~ /<saml:AuthnContextDeclRef>example\/decl\/ref<\/saml:AuthnContextDeclRef>/
     end
 
+    it "exposes the requested authentication context bound to the request id" do
+      settings.authn_context = ['class-1', 'class-2']
+      settings.authn_context_decl_ref = 'decl-1'
+      settings.authn_context_comparison = 'minimum'
+      settings.authn_context_ordering = { 'class-1' => 'class-2' }
+      auth_request = OneLogin::RubySaml::Authrequest.new
+      requested_context = auth_request.requested_authn_context(settings)
+
+      assert_equal auth_request.uuid, requested_context.request_id
+      assert_equal 'minimum', requested_context.comparison
+      assert_equal ['class-1', 'class-2'], requested_context.class_refs.map(&:value)
+      assert_equal ['decl-1'], requested_context.decl_refs.map(&:value)
+      assert_equal ['class-1', 'class-2'], requested_context.ordering.path('class-1', 'class-2')
+    end
+
     describe "DEPRECATED: #create_params signing with HTTP-POST binding via :embed_sign" do
       before do
         settings.compress_request = false

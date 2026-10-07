@@ -588,6 +588,40 @@ pp(response.attributes.fetch(/givenname/))
 The `saml:AuthnContextClassRef` of the AuthNRequest can be provided by `settings.authn_context`; possible values are described at [SAMLAuthnCxt]. The comparison method can be set using `settings.authn_context_comparison` parameter. Possible values include: 'exact', 'better', 'maximum' and 'minimum' (default value is 'exact').
 To add a `saml:AuthnContextDeclRef`, define `settings.authn_context_decl_ref`.
 
+Authentication contexts do not share a universal numeric ranking. For `minimum`, `maximum`, and `better`, register an explicit, auditable partial order in `settings.authn_context_ordering`. Each edge means that the right-hand context is stronger than the left-hand context. Unknown or incomparable contexts never implicitly satisfy a request.
+
+```ruby
+saml_settings.authn_context = ["https://example.example/ac/mfa", "https://example.example/ac/hardware-key"]
+saml_settings.authn_context_comparison = "better"
+saml_settings.authn_context_ordering = {
+  "https://example.example/ac/mfa" => "https://example.example/ac/mfa-and-hardware-key",
+  "https://example.example/ac/hardware-key" => "https://example.example/ac/mfa-and-hardware-key"
+}
+```
+
+Store the request object (or its `RequestedAuthnContext`) with the request ID before redirecting to the IdP. Pass the saved constraints to the response so each candidate, actual `AuthnStatement`, and request ID remain bound together.
+
+```ruby
+auth_request = OneLogin::RubySaml::Authrequest.new
+requested_context = auth_request.requested_authn_context(saml_settings)
+session[:saml_request_contexts] = { auth_request.uuid => requested_context }
+redirect_to(auth_request.create(saml_settings))
+
+response = OneLogin::RubySaml::Response.new(
+  params[:SAMLResponse],
+  settings: saml_settings,
+  requested_authn_contexts: session.delete(:saml_request_contexts).values,
+  allow_unsolicited_response: false
+)
+
+if response.is_valid?
+  response.authn_context_match.to_h
+  # Includes the actual context, satisfied candidate(s), comparison, and comparison path(s)
+end
+```
+
+Set `allow_unsolicited_response: true` to accept IdP-initiated responses. To enforce a context on those responses too, include a `RequestedAuthnContext` whose `request_id` is nil.
+
 In a SP-initiated flow, the SP can indicate to the IdP the subject that should be authenticated. This is done by defining the `settings.name_identifier_value_requested` before
 building the authrequest object.
 

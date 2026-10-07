@@ -2,6 +2,7 @@ require "rexml/document"
 
 require "onelogin/ruby-saml/logging"
 require "onelogin/ruby-saml/saml_message"
+require "onelogin/ruby-saml/requested_authn_context"
 require "onelogin/ruby-saml/utils"
 require "onelogin/ruby-saml/setting_error"
 
@@ -26,6 +27,12 @@ module OneLogin
 
       def request_id
         @uuid
+      end
+
+      def requested_authn_context(settings)
+        return nil if settings.authn_context.nil? && settings.authn_context_decl_ref.nil?
+
+        RequestedAuthnContext.from_settings(settings, uuid)
       end
 
       # Creates the AuthNRequest string.
