@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+  <soap:Header>
+    <paos:Request xmlns:paos="urn:liberty:paos:2003-08" soap:mustUnderstand="1" soap:actor="http://schemas.xmlsoap.org/soap/actor/next" responseConsumerURL="https://sp.example.com/acs" service="urn:oasis:names:tc:SAML:2.0:profiles:SSO:ecp"/>
+    <ecp:Request xmlns:ecp="urn:oasis:names:tc:SAML:2.0:profiles:SSO:ecp" soap:mustUnderstand="1" soap:actor="http://schemas.xmlsoap.org/soap/actor/next">
+      <saml:Issuer xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion">https://sp.example.com/metadata</saml:Issuer>
+    </ecp:Request>
+    <ecp:RelayState xmlns:ecp="urn:oasis:names:tc:SAML:2.0:profiles:SSO:ecp" soap:mustUnderstand="1" soap:actor="http://schemas.xmlsoap.org/soap/actor/next">relay-token-123</ecp:RelayState>
+  </soap:Header>
+  <soap:Body>
+    <samlp:AuthnRequest xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="_ecp-request-1" Version="2.0" IssueInstant="2026-10-07T02:00:00Z" AssertionConsumerServiceURL="https://sp.example.com/acs" ProtocolBinding="urn:oasis:names:tc:SAML:2.0:bindings:PAOS">
+      <saml:Issuer>https://sp.example.com/metadata</saml:Issuer>
+      <samlp:NameIDPolicy Format="urn:oasis:names:tc:SAML:2.0:nameid-format:transient" AllowCreate="true"/>
+    </samlp:AuthnRequest>
+  </soap:Body>
+</soap:Envelope>

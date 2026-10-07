@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+  <soap:Header>
+    <ecp:Response xmlns:ecp="urn:oasis:names:tc:SAML:2.0:profiles:SSO:ecp" soap:mustUnderstand="1" soap:actor="http://schemas.xmlsoap.org/soap/actor/next" AssertionConsumerServiceURL="https://sp.example.com/acs"/>
+  </soap:Header>
+  <soap:Body>
+    <samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="_idp-response-1" Version="2.0" IssueInstant="2026-10-07T02:00:30Z" InResponseTo="_ecp-request-1" Destination="https://sp.example.com/acs">
+      <saml:Issuer>https://idp.example.com/sso</saml:Issuer>
+      <samlp:Status>
+        <samlp:StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success"/>
+      </samlp:Status>
+      <saml:Assertion ID="_assertion-1" Version="2.0" IssueInstant="2026-10-07T02:00:30Z">
+        <saml:Issuer>https://idp.example.com/sso</saml:Issuer>
+        <saml:Subject>
+          <saml:NameID Format="urn:oasis:names:tc:SAML:2.0:nameid-format:transient">ecp-user</saml:NameID>
+          <saml:SubjectConfirmation Method="urn:oasis:names:tc:SAML:2.0:cm:bearer">
+            <saml:SubjectConfirmationData InResponseTo="_ecp-request-1" Recipient="https://sp.example.com/acs" NotOnOrAfter="2026-10-07T02:05:00Z"/>
+          </saml:SubjectConfirmation>
+        </saml:Subject>
+        <saml:Conditions NotBefore="2026-10-07T02:00:30Z" NotOnOrAfter="2026-10-07T02:05:00Z">
+          <saml:AudienceRestriction>
+            <saml:Audience>https://sp.example.com/metadata</saml:Audience>
+          </saml:AudienceRestriction>
+        </saml:Conditions>
+        <saml:AuthnStatement AuthnInstant="2026-10-07T02:00:30Z">
+          <saml:AuthnContext>
+            <saml:AuthnContextClassRef>urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport</saml:AuthnContextClassRef>
+          </saml:AuthnContext>
+        </saml:AuthnStatement>
+      </saml:Assertion>
+    </samlp:Response>
+  </soap:Body>
+</soap:Envelope>
