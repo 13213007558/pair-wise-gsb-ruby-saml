@@ -119,7 +119,10 @@ module XMLSecurity
     SHA384          = "http://www.w3.org/2001/04/xmldsig-more#sha384"
     SHA512          = 'http://www.w3.org/2001/04/xmlenc#sha512'
     ENVELOPED_SIG   = "http://www.w3.org/2000/09/xmldsig#enveloped-signature"
-    INC_PREFIX_LIST = "#default samlp saml ds xs xsi md"
+    # Include saml so assertions signed before being placed in a samlp Response
+    # retain the same exclusive canonical form. samlp must remain excluded from
+    # assertion signatures because it is inherited from the outer Response.
+    INC_PREFIX_LIST = "#default saml ds xs xsi md"
 
     attr_writer :uuid
 
