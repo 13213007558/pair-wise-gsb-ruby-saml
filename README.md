@@ -794,6 +794,63 @@ is invalid using the `settings.security[:strict_audience_validation]` parameter.
 settings.security[:strict_audience_validation] = true
 ```
 
+## HTTP Artifact Binding
+
+Some Identity Providers redirect the user agent back to the Assertion Consumer
+Service with a `SAMLart` query parameter instead of a `SAMLResponse`. The
+artifact is an opaque, single-use reference: the SP must dereference it by
+sending a SOAP `ArtifactResolve` request to the IdP Artifact Resolution
+Service, and validate the returned `ArtifactResponse` together with the SAML
+Response it carries.
+
+`OneLogin::RubySaml::ArtifactReceiver` implements this flow:
+
+```ruby
+def consume
+  if params[:SAMLart]
+    receiver = OneLogin::RubySaml::ArtifactReceiver.new(saml_settings)
+    response = receiver.resolve(params[:SAMLart], :matches_request_id => session[:request_id])
+    session[:userid] = response.nameid
+  else
+    # ... usual SAMLResponse handling
+  end
+rescue OneLogin::RubySaml::ArtifactTransportError
+  # Transient network failure talking to the IdP: the artifact was released
+  # and the resolution may be retried.
+  head :bad_gateway
+rescue OneLogin::RubySaml::ArtifactResolutionError, OneLogin::RubySaml::ArtifactReplayError
+  # The artifact or the resolved message is invalid, or the artifact was
+  # already consumed: do NOT retry with the same artifact.
+  head :forbidden
+end
+```
+
+The resolution endpoint is selected from the trusted IdP configuration, never
+from the artifact content:
+
+```ruby
+# Indexed endpoints, usually parsed from the IdP metadata
+# (md:ArtifactResolutionService elements):
+settings.idp_artifact_resolution_services = { 0 => "https://idp.example.com/artifact" }
+
+# ... or a single fallback endpoint:
+settings.idp_artifact_resolution_service_url = "https://idp.example.com/artifact"
+```
+
+The artifact `SourceID` is verified against `settings.idp_entity_id`, and the
+`ArtifactResponse` envelope is checked for a matching `InResponseTo`, the
+expected `Issuer`, a Success status and — when a signature is present — a valid
+IdP signature. Set `settings.security[:want_artifact_response_signed] = true`
+to require the `ArtifactResponse` to be signed. The inner SAML Response is
+validated by the standard `OneLogin::RubySaml::Response` validation chain.
+
+Artifacts are single-use. The receiver tracks consumed artifacts through an
+injectable store (`OneLogin::RubySaml::InMemoryArtifactStore` by default);
+provide your own `OneLogin::RubySaml::ArtifactStore` implementation backed by
+shared storage for multi-process deployments. The SOAP transport is injectable
+as well: pass any object responding to `#post(url, soap_envelope)` as
+`transport:`.
+
 ## Single Log Out
 
 Ruby SAML supports SP-initiated Single Logout and IdP-Initiated Single Logout.

@@ -40,6 +40,8 @@ module OneLogin
       attr_accessor :idp_cert_multi
       attr_accessor :idp_attribute_names
       attr_accessor :idp_name_qualifier
+      attr_accessor :idp_artifact_resolution_service_url
+      attr_accessor :idp_artifact_resolution_services
       attr_accessor :valid_until
       # SP Data
       attr_writer   :sp_entity_id
@@ -299,6 +301,7 @@ module OneLogin
           :check_idp_cert_expiration  => false,
           :check_sp_cert_expiration   => false,
           :strict_audience_validation => false,
+          :want_artifact_response_signed => false,
           :lowercase_url_encoding     => false
         }.freeze
       }.freeze
@@ -383,4 +386,3 @@ module OneLogin
     end
   end
 end
-
