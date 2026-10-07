@@ -16,7 +16,9 @@ module OneLogin
       include REXML
 
       ASSERTION = "urn:oasis:names:tc:SAML:2.0:assertion".freeze
+      SOAP11 = "http://schemas.xmlsoap.org/soap/envelope/".freeze
       PROTOCOL  = "urn:oasis:names:tc:SAML:2.0:protocol".freeze
+      SOAP12 = "http://www.w3.org/2003/05/soap-envelope".freeze
 
       BASE64_FORMAT = %r{\A([A-Za-z0-9+/]{4})*([A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?\Z}
 
@@ -35,7 +37,7 @@ module OneLogin
         @version ||= begin
           node = REXML::XPath.first(
             document,
-            "/p:AuthnRequest | /p:Response | /p:LogoutResponse | /p:LogoutRequest",
+            "/p:AuthnRequest | /p:Response | /p:LogoutResponse | /p:LogoutRequest | /p:ManageNameIDRequest | /p:ManageNameIDResponse",
             { "p" => PROTOCOL }
           )
           node.nil? ? nil : node.attributes['Version']
@@ -48,7 +50,7 @@ module OneLogin
         @id ||= begin
           node = REXML::XPath.first(
             document,
-            "/p:AuthnRequest | /p:Response | /p:LogoutResponse | /p:LogoutRequest",
+            "/p:AuthnRequest | /p:Response | /p:LogoutResponse | /p:LogoutRequest | /p:ManageNameIDRequest | /p:ManageNameIDResponse",
             { "p" => PROTOCOL }
           )
           node.nil? ? nil : node.attributes['ID']
@@ -74,6 +76,22 @@ module OneLogin
           return false if soft
           raise ValidationError.new("#{schema_error.message}\n\n#{xml}")
         end
+      end
+
+      def self.soap_envelope(saml_message)
+        "<soapenv:Envelope xmlns:soapenv=\"#{SOAP11}\"><soapenv:Body>#{saml_message}</soapenv:Body></soapenv:Envelope>"
+      end
+
+      def self.extract_saml_from_soap(soap_message)
+        return nil if soap_message.to_s.include?("<!DOCTYPE")
+        document = REXML::Document.new(soap_message)
+        namespaces = { "s11" => SOAP11, "s12" => SOAP12 }
+        node = REXML::XPath.first(
+          document,
+          "/s11:Envelope/s11:Body/*[local-name()='ManageNameIDRequest' or local-name()='ManageNameIDResponse'] | /s12:Envelope/s12:Body/*[local-name()='ManageNameIDRequest' or local-name()='ManageNameIDResponse']",
+          namespaces
+        )
+        node.nil? ? nil : node.to_s
       end
 
       private

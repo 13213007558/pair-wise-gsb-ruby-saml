@@ -57,6 +57,15 @@ class MetadataTest < Minitest::Test
       assert validate_xml!(xml_text, "saml-schema-metadata-2.0.xsd")
     end
 
+    it "generates Service Provider Metadata with a SOAP ManageNameID service" do
+      settings.sp_manage_name_id_service_url = "https://foo.example/saml/manage-name-id"
+      doc = REXML::Document.new(OneLogin::RubySaml::Metadata.new.generate(settings, false))
+      node = REXML::XPath.first(doc, "//md:ManageNameIDService")
+      assert_equal OneLogin::RubySaml::Utils::BINDINGS[:soap], node.attribute("Binding").value
+      assert_equal "https://foo.example/saml/manage-name-id", node.attribute("Location").value
+      assert_nil node.attribute("ResponseLocation")
+    end
+
     it "generates Service Provider Metadata with single logout service" do
       start = "<?xml version='1.0' encoding='UTF-8'?><md:EntityDescriptor"
       assert_equal xml_text[0..start.length-1], start

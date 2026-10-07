@@ -1,0 +1,9 @@
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
+  <soapenv:Body>
+    <samlp:ManageNameIDRequest xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="_manage-terminate-001" Version="2.0" IssueInstant="2026-10-07T08:05:00Z" Destination="https://sp.example.com/saml/manage-name-id">
+      <saml:Issuer>https://idp.example.com/</saml:Issuer>
+      <saml:NameID Format="urn:oasis:names:tc:SAML:2.0:nameid-format:persistent" NameQualifier="https://idp.example.com/" SPNameQualifier="https://sp.example.com">terminated-identifier-789</saml:NameID>
+      <samlp:Terminate/>
+    </samlp:ManageNameIDRequest>
+  </soapenv:Body>
+</soapenv:Envelope>

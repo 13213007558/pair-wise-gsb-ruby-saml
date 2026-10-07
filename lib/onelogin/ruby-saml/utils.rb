@@ -14,9 +14,12 @@ module OneLogin
       @@uuid_generator = UUID.new if RUBY_VERSION < '1.9'
 
       BINDINGS = { :post => "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST".freeze,
-                   :redirect => "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect".freeze }.freeze
+                   :redirect => "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect".freeze,
+                   :soap => "urn:oasis:names:tc:SAML:2.0:bindings:SOAP".freeze }.freeze
       DSIG = "http://www.w3.org/2000/09/xmldsig#".freeze
       XENC = "http://www.w3.org/2001/04/xmlenc#".freeze
+      SOAP11 = "http://schemas.xmlsoap.org/soap/envelope/".freeze
+      SOAP12 = "http://www.w3.org/2003/05/soap-envelope".freeze
       DURATION_FORMAT = %r(^
         (-?)P                       # 1: Duration sign
         (?:
@@ -294,6 +297,40 @@ module OneLogin
         end
 
         raise(error) if error
+      end
+
+      # Encrypts a SAML element for an EncryptedID or NewEncryptedID node.
+      def self.encrypt_element(element, certificate, options = {})
+        raise ArgumentError.new('certificate must be specified') if certificate.nil?
+        raise ArgumentError.new('element must be specified') if element.nil? || element.to_s.empty?
+
+        certificate = OpenSSL::X509::Certificate.new(certificate) if certificate.is_a?(String)
+        symmetric_key = OpenSSL::Cipher.new('AES-128-CBC').random_key
+        symmetric_iv = OpenSSL::Cipher.new('AES-128-CBC').random_iv
+
+        cipher = OpenSSL::Cipher.new('AES-128-CBC').encrypt
+        cipher.key = symmetric_key
+        cipher.iv = symmetric_iv
+        encrypted_element = cipher.update(element) << cipher.final
+
+        rsa = OpenSSL::PKey::RSA.new(certificate.public_key.to_pem)
+        encrypted_key = rsa.public_encrypt(symmetric_key)
+
+        encrypted_doc = REXML::Document.new
+        encrypted_data = encrypted_doc.add_element('xenc:EncryptedData', {
+          'xmlns:xenc' => XENC,
+          'xmlns:ds' => DSIG,
+          'Type' => 'http://www.w3.org/2001/04/xmlenc#Element'
+        })
+        encrypted_data.add_element('xenc:EncryptionMethod', { 'Algorithm' => 'http://www.w3.org/2001/04/xmlenc#aes128-cbc' })
+        key_info = encrypted_data.add_element('ds:KeyInfo')
+        encrypted_key_node = key_info.add_element('xenc:EncryptedKey')
+        encrypted_key_node.add_element('xenc:EncryptionMethod', { 'Algorithm' => 'http://www.w3.org/2001/04/xmlenc#rsa-1_5' })
+        key_cipher_data = encrypted_key_node.add_element('xenc:CipherData')
+        key_cipher_data.add_element('xenc:CipherValue').text = Base64.encode64(encrypted_key).gsub(/\n/, '')
+        data_cipher_data = encrypted_data.add_element('xenc:CipherData')
+        data_cipher_data.add_element('xenc:CipherValue').text = Base64.encode64(symmetric_iv + encrypted_element).gsub(/\n/, '')
+        encrypted_data
       end
 
       # Obtains the decrypted string from an Encrypted node element in XML

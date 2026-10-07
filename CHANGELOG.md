@@ -1,5 +1,12 @@
 # Ruby SAML Changelog
 
+### Unreleased
+* Add SAML 2.0 ManageNameIDRequest/ManageNameIDResponse support over SOAP
+* Add local ManageNameID submission callback integration with pluggable, durable request records
+* Distinguish transport failures, rejected remote statuses, local submission failures, validation errors, duplicates, and success
+* Parse and generate NewID, NewEncryptedID, Terminate, EncryptedID, and fully qualified NameID identity tuples
+* Publish and parse SOAP ManageNameID endpoints in metadata
+
 ### 1.18.1  (Jul 29, 2025)
 * Fix vulnerability CVE-2025-54572 Prevent DOS due large SAML Message
 * Adapt tests to be able to execute signature validation sooner

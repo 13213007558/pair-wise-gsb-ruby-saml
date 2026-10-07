@@ -360,6 +360,65 @@ def saml_settings
 end
 ```
 
+## Managing Name Identifiers
+
+ManageNameID changes only the federated identifier. It does not sign the user out
+and it does not delete or recreate the local account. The toolkit supports the
+SAML 2.0 ManageNameID request/response messages over SOAP.
+
+Configure the IdP endpoint and, when receiving IdP-initiated requests, the SP
+endpoint:
+
+```ruby
+settings.idp_manage_name_id_service_url = "https://idp.example.com/soap/manage-name-id"
+settings.sp_manage_name_id_service_url = "https://sp.example.com/saml/manage-name-id"
+settings.security[:manage_name_id_requests_signed] = true
+settings.security[:manage_name_id_responses_signed] = true
+settings.security[:want_manage_name_id_requests_signed] = true
+```
+
+The old identifier is matched as a tuple of `NameID`, `Format`,
+`NameQualifier`, and `SPNameQualifier`. `NewID`, `NewEncryptedID`, and
+`Terminate` are mutually exclusive.
+
+```ruby
+record_store = {} # Replace this with durable, transactional application storage.
+service = OneLogin::RubySaml::ManageNameIDService.new(
+  settings,
+  record_store: record_store,
+  callback: lambda do |change|
+    # change[:action] is :new_id, :new_encrypted_id, or :terminate.
+    # Persist change[:new_identity] against change[:old_identity] here.
+  end,
+  identity_verifier: lambda do |identity|
+    Account.find_by_federated_identity(identity)
+  end
+)
+
+result = service.submit(
+  request_id: stored_request_id, # Stable ID makes retries reproducible.
+  old_name_id: "old-identifier",
+  old_name_id_format: "urn:oasis:names:tc:SAML:2.0:nameid-format:persistent",
+  old_name_qualifier: "https://idp.example.com/",
+  old_sp_name_qualifier: "https://sp.example.com",
+  new_id: "new-identifier"
+)
+```
+
+Inspect `result.status` or the predicate methods (`send_failed?`, `rejected?`,
+`local_submission_failed?`, `duplicate?`, and `success?`). A local failure after a
+successful remote response is returned as `:local_submission_failed`; the toolkit
+does not imply that the remote change was rolled back. Retrying the same request
+ID replays the stored state: transport failures are resent, rejected/validation
+states remain stable, and a remote success only retries the local callback.
+
+To receive an IdP-initiated SOAP request, validate and consume it once:
+
+```ruby
+result = service.receive(request_body)
+render xml: result.response, content_type: "text/xml" if result.response
+```
+
 The following attributes are set:
   * idp_entity_id
   * name_identifier_format

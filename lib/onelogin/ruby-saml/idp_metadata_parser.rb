@@ -59,6 +59,7 @@ module OneLogin
       # @option options [String, nil] :entity_id when this is given, the entity descriptor for this ID is used. When omitted, the first entity descriptor is used.
       # @option options [String, Array<String>, nil] :sso_binding an ordered list of bindings to detect the single signon URL. The first binding in the list that is included in the metadata will be used.
       # @option options [String, Array<String>, nil] :slo_binding an ordered list of bindings to detect the single logout URL. The first binding in the list that is included in the metadata will be used.
+      # @option options [String, Array<String>, nil] :manage_name_id_binding an ordered list of bindings to detect the Manage NameID URL. The first binding in the list that is included in the metadata will be used.
       # @option options [String, Array<String>, nil] :name_id_format an ordered list of NameIDFormats to detect a desired value. The first NameIDFormat in the list that is included in the metadata will be used.
       #
       # @return [OneLogin::RubySaml::Settings]
@@ -78,6 +79,7 @@ module OneLogin
       # @option options [String, nil] :entity_id when this is given, the entity descriptor for this ID is used. When omitted, the first entity descriptor is used.
       # @option options [String, Array<String>, nil] :sso_binding an ordered list of bindings to detect the single signon URL. The first binding in the list that is included in the metadata will be used.
       # @option options [String, Array<String>, nil] :slo_binding an ordered list of bindings to detect the single logout URL. The first binding in the list that is included in the metadata will be used.
+      # @option options [String, Array<String>, nil] :manage_name_id_binding an ordered list of bindings to detect the Manage NameID URL. The first binding in the list that is included in the metadata will be used.
       # @option options [String, Array<String>, nil] :name_id_format an ordered list of NameIDFormats to detect a desired value. The first NameIDFormat in the list that is included in the metadata will be used.
       #
       # @return [Hash]
@@ -96,6 +98,7 @@ module OneLogin
       # @option options [String, nil] :entity_id when this is given, the entity descriptor for this ID is used. When omitted, all found IdPs are returned.
       # @option options [String, Array<String>, nil] :sso_binding an ordered list of bindings to detect the single signon URL. The first binding in the list that is included in the metadata will be used.
       # @option options [String, Array<String>, nil] :slo_binding an ordered list of bindings to detect the single logout URL. The first binding in the list that is included in the metadata will be used.
+      # @option options [String, Array<String>, nil] :manage_name_id_binding an ordered list of bindings to detect the Manage NameID URL. The first binding in the list that is included in the metadata will be used.
       # @option options [String, Array<String>, nil] :name_id_format an ordered list of NameIDFormats to detect a desired value. The first NameIDFormat in the list that is included in the metadata will be used.
       #
       # @return [Array<Hash>]
@@ -115,6 +118,7 @@ module OneLogin
       # @option options [String, nil] :entity_id when this is given, the entity descriptor for this ID is used. When omitted, the first entity descriptor is used.
       # @option options [String, Array<String>, nil] :sso_binding an ordered list of bindings to detect the single signon URL. The first binding in the list that is included in the metadata will be used.
       # @option options [String, Array<String>, nil] :slo_binding an ordered list of bindings to detect the single logout URL. The first binding in the list that is included in the metadata will be used.
+      # @option options [String, Array<String>, nil] :manage_name_id_binding an ordered list of bindings to detect the Manage NameID URL. The first binding in the list that is included in the metadata will be used.
       # @option options [String, Array<String>, nil] :name_id_format an ordered list of NameIDFormats to detect a desired value. The first NameIDFormat in the list that is included in the metadata will be used.
       #
       # @return [OneLogin::RubySaml::Settings]
@@ -152,6 +156,7 @@ module OneLogin
       # @option options [String, nil] :entity_id when this is given, the entity descriptor for this ID is used. When omitted, the first entity descriptor is used.
       # @option options [String, Array<String>, nil] :sso_binding an ordered list of bindings to detect the single signon URL. The first binding in the list that is included in the metadata will be used.
       # @option options [String, Array<String>, nil] :slo_binding an ordered list of bindings to detect the single logout URL. The first binding in the list that is included in the metadata will be used.
+      # @option options [String, Array<String>, nil] :manage_name_id_binding an ordered list of bindings to detect the Manage NameID URL. The first binding in the list that is included in the metadata will be used.
       # @option options [String, Array<String>, nil] :name_id_format an ordered list of NameIDFormats to detect a desired value. The first NameIDFormat in the list that is included in the metadata will be used.
       #
       # @return [Hash]
@@ -167,6 +172,7 @@ module OneLogin
       # @option options [String, nil] :entity_id when this is given, the entity descriptor for this ID is used. When omitted, all found IdPs are returned.
       # @option options [String, Array<String>, nil] :sso_binding an ordered list of bindings to detect the single signon URL. The first binding in the list that is included in the metadata will be used.
       # @option options [String, Array<String>, nil] :slo_binding an ordered list of bindings to detect the single logout URL. The first binding in the list that is included in the metadata will be used.
+      # @option options [String, Array<String>, nil] :manage_name_id_binding an ordered list of bindings to detect the Manage NameID URL. The first binding in the list that is included in the metadata will be used.
       # @option options [String, Array<String>, nil] :name_id_format an ordered list of NameIDFormats to detect a desired value. The first NameIDFormat in the list that is included in the metadata will be used.
       #
       # @return [Array<Hash>]
@@ -231,6 +237,7 @@ module OneLogin
         def to_hash(options = {})
           sso_binding = options[:sso_binding]
           slo_binding = options[:slo_binding]
+          manage_name_id_binding = options[:manage_name_id_binding] || Utils::BINDINGS[:soap]
           {
             :idp_entity_id => @entity_id,
             :name_identifier_format => idp_name_id_format(options[:name_id_format]),
@@ -239,6 +246,8 @@ module OneLogin
             :idp_slo_service_url => single_logout_service_url(slo_binding),
             :idp_slo_service_binding => single_logout_service_binding(slo_binding),
             :idp_slo_response_service_url => single_logout_response_service_url(slo_binding),
+            :idp_manage_name_id_service_url => manage_name_id_service_url(manage_name_id_binding),
+            :idp_manage_name_id_service_binding => manage_name_id_service_binding(manage_name_id_binding),
             :idp_attribute_names => attribute_names,
             :idp_cert => nil,
             :idp_cert_fingerprint => nil,
@@ -340,6 +349,27 @@ module OneLogin
           node = REXML::XPath.first(
             @idpsso_descriptor,
             "md:SingleLogoutService[@Binding=\"#{binding}\"]/@ResponseLocation",
+            SamlMetadata::NAMESPACE
+          )
+          node.value if node
+        end
+
+        def manage_name_id_service_binding(binding_priority = nil)
+          nodes = REXML::XPath.match(
+            @idpsso_descriptor,
+            "md:ManageNameIDService/@Binding",
+            SamlMetadata::NAMESPACE
+          )
+          first_ranked_value(nodes, binding_priority)
+        end
+
+        def manage_name_id_service_url(binding_priority = nil)
+          binding = manage_name_id_service_binding(binding_priority)
+          return if binding.nil?
+
+          node = REXML::XPath.first(
+            @idpsso_descriptor,
+            "md:ManageNameIDService[@Binding=\"#{binding}\"]/@Location",
             SamlMetadata::NAMESPACE
           )
           node.value if node

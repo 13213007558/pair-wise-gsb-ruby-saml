@@ -34,6 +34,7 @@ module OneLogin
       attr_writer   :idp_sso_service_url
       attr_writer   :idp_slo_service_url
       attr_accessor :idp_slo_response_service_url
+      attr_writer   :idp_manage_name_id_service_url
       attr_accessor :idp_cert
       attr_accessor :idp_cert_fingerprint
       attr_accessor :idp_cert_fingerprint_algorithm
@@ -46,6 +47,7 @@ module OneLogin
       attr_accessor :assertion_consumer_service_url
       attr_reader   :assertion_consumer_service_binding
       attr_writer   :single_logout_service_url
+      attr_accessor :sp_manage_name_id_service_url
       attr_accessor :sp_name_qualifier
       attr_accessor :name_identifier_format
       attr_accessor :name_identifier_value
@@ -90,6 +92,12 @@ module OneLogin
         @idp_slo_service_url || @idp_slo_target_url
       end
 
+      # @return [String] IdP Manage NameID Service URL
+      #
+      def idp_manage_name_id_service_url
+        @idp_manage_name_id_service_url
+      end
+
       # @return [String] IdP Single Sign On Service Binding
       #
       def idp_sso_service_binding
@@ -114,6 +122,16 @@ module OneLogin
       #
       def idp_slo_service_binding=(value)
         @idp_slo_service_binding = get_binding(value)
+      end
+
+      # @return [String] IdP Manage NameID Service Binding
+      #
+      def idp_manage_name_id_service_binding
+        @idp_manage_name_id_service_binding || Utils::BINDINGS[:soap]
+      end
+
+      def idp_manage_name_id_service_binding=(value)
+        @idp_manage_name_id_service_binding = get_binding(value)
       end
 
       # @return [String] SP Entity ID
@@ -183,6 +201,14 @@ module OneLogin
       #
       def get_idp_cert
         OneLogin::RubySaml::Utils.build_cert_object(idp_cert)
+      end
+
+      # @return [OpenSSL::X509::Certificate|nil] The first IdP encryption certificate.
+      #
+      def get_idp_encryption_cert
+        certs = get_idp_cert_multi
+        cert = certs && certs[:encryption] && certs[:encryption].first
+        cert || get_idp_cert
       end
 
       # @return [Hash with 2 arrays of OpenSSL::X509::Certificate] Build multiple IdP certificates from the settings.
@@ -289,6 +315,9 @@ module OneLogin
           :authn_requests_signed      => false,
           :logout_requests_signed     => false,
           :logout_responses_signed    => false,
+          :manage_name_id_requests_signed => false,
+          :manage_name_id_responses_signed => false,
+          :want_manage_name_id_requests_signed => true,
           :want_assertions_signed     => false,
           :want_assertions_encrypted  => false,
           :want_name_id               => false,
@@ -383,4 +412,3 @@ module OneLogin
     end
   end
 end
-

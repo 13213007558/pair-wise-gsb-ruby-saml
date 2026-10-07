@@ -34,6 +34,16 @@ class IdpMetadataParserTest < Minitest::Test
       assert_equal '2014-04-17T18:02:33.910Z', settings.valid_until
     end
 
+    it "extracts the SOAP ManageNameID endpoint" do
+      metadata = idp_metadata_descriptor.sub(
+        '<md:SingleLogoutService',
+        '<md:ManageNameIDService Binding="urn:oasis:names:tc:SAML:2.0:bindings:SOAP" Location="https://hello.example.com/access/saml/manage-name-id"/><md:SingleLogoutService'
+      )
+      settings = OneLogin::RubySaml::IdpMetadataParser.new.parse(metadata)
+      assert_equal "https://hello.example.com/access/saml/manage-name-id", settings.idp_manage_name_id_service_url
+      assert_equal OneLogin::RubySaml::Utils::BINDINGS[:soap], settings.idp_manage_name_id_service_binding
+    end
+
     it "extract certificate from md:KeyDescriptor[@use='signing']" do
       idp_metadata_parser = OneLogin::RubySaml::IdpMetadataParser.new
       idp_metadata = idp_metadata_descriptor

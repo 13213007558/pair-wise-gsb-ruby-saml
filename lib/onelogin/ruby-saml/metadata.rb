@@ -76,6 +76,13 @@ module OneLogin
       end
 
       def add_sp_service_elements(sp_sso, settings)
+        if settings.sp_manage_name_id_service_url
+          sp_sso.add_element "md:ManageNameIDService", {
+              "Binding" => Utils::BINDINGS[:soap],
+              "Location" => settings.sp_manage_name_id_service_url
+          }
+        end
+
         if settings.single_logout_service_url
           sp_sso.add_element "md:SingleLogoutService", {
               "Binding" => settings.single_logout_service_binding,

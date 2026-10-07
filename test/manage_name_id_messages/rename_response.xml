@@ -1,0 +1,10 @@
+<soapenv:Envelope xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/">
+  <soapenv:Body>
+    <samlp:ManageNameIDResponse xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="_manage-rename-response-001" Version="2.0" IssueInstant="2026-10-07T08:00:01Z" InResponseTo="_manage-rename-001">
+      <saml:Issuer>https://sp.example.com</saml:Issuer>
+      <samlp:Status>
+        <samlp:StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success"/>
+      </samlp:Status>
+    </samlp:ManageNameIDResponse>
+  </soapenv:Body>
+</soapenv:Envelope>
