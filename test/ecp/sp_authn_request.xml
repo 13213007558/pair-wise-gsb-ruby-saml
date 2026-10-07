@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+  <soap:Header>
+    <paos:Request xmlns:paos="urn:liberty:paos:2003-08" soap:mustUnderstand="1" soap:actor="http://schemas.xmlsoap.org/soap/actor/next" responseConsumerURL="https://sp.example.com/acs" service="urn:oasis:names:tc:SAML:2.0:profiles:SSO:ecp" messageID="_paos1"/>
+    <ecp:RelayState xmlns:ecp="urn:oasis:names:tc:SAML:2.0:profiles:SSO:ecp" soap:mustUnderstand="1" soap:actor="urn:oasis:names:tc:SAML:2.0:profiles:SSO:ecp">relay-token-123</ecp:RelayState>
+  </soap:Header>
+  <soap:Body>
+    <samlp:AuthnRequest xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="_spRequest1" Version="2.0" IssueInstant="2026-10-07T01:00:00Z" AssertionConsumerServiceURL="https://sp.example.com/acs">
+      <saml:Issuer>https://sp.example.com/metadata</saml:Issuer>
+      <samlp:NameIDPolicy Format="urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified" AllowCreate="1"/>
+    </samlp:AuthnRequest>
+  </soap:Body>
+</soap:Envelope>

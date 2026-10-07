@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+  <soap:Header><ecp:RelayState xmlns:ecp="urn:oasis:names:tc:SAML:2.0:profiles:SSO:ecp" soap:mustUnderstand="1" soap:actor="urn:oasis:names:tc:SAML:2.0:profiles:SSO:ecp">relay-token-123</ecp:RelayState></soap:Header>
+  <soap:Body>
+    <samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="_idpResponse1" InResponseTo="_spRequest1" Version="2.0" IssueInstant="2026-10-07T01:00:05Z" Destination="https://sp.example.com/acs">
+      <saml:Issuer>https://idp.example.com/sso</saml:Issuer>
+      <samlp:Status>
+        <samlp:StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success"/>
+      </samlp:Status>
+      <saml:Assertion ID="_assertion1" Version="2.0" IssueInstant="2026-10-07T01:00:05Z">
+        <saml:Issuer>https://idp.example.com/sso</saml:Issuer>
+        <saml:Subject>
+          <saml:NameID Format="urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified">ecp-user</saml:NameID>
+        </saml:Subject>
+      </saml:Assertion>
+    </samlp:Response>
+  </soap:Body>
+</soap:Envelope>

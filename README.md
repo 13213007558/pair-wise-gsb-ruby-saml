@@ -1101,6 +1101,37 @@ def consume
 end
 ```
 
+## ECP Client
+
+For clients that cannot redirect a browser (CLI tools, background jobs,
+devices), the toolkit implements the client side of the SAML 2.0 ECP
+(Enhanced Client or Proxy) basic profile. The client takes the PAOS
+AuthnRequest sent by the Service Provider, delivers it to the configured
+Identity Provider and returns the IdP response to the Service Provider.
+All network I/O goes through a caller supplied adapter, so no HTTP
+library is required:
+
+    # The adapter must respond to post(url, body, headers, credentials)
+    # and return an object exposing #status and #body.
+    client = OneLogin::RubySaml::ECP::Client.new(
+      :idp_url => "https://idp.example.com/saml/ecp",
+      :http_adapter => my_adapter,
+      :idp_credentials => { :username => "user", :password => "secret" } # IdP leg only
+    )
+
+    begin
+      soap_response = client.handle_sp_request(paos_authn_request_xml)
+      # deliver soap_response back to the Service Provider
+    rescue OneLogin::RubySaml::ECP::SOAPFaultError => fault
+      # return fault.to_soap to the Service Provider
+    end
+
+The client validates RelayState, SOAP actor/mustUnderstand and the
+AssertionConsumerServiceURL of the IdP response against the address
+declared by the Service Provider. SP and IdP credentials are kept
+separate: IdP credentials travel only with the IdP-bound request. ECP
+2.0 extensions such as channel bindings are not implemented.
+
 ## Contributing
 
 ### Pay it Forward: Support RubySAML and Strengthen Open-Source Security
