@@ -1101,6 +1101,38 @@ def consume
 end
 ```
 
+## Enhanced Client or Proxy (ECP)
+
+Use `OneLogin::RubySaml::Ecp::Client` for non-browser clients. The toolkit builds and validates the PAOS/SOAP messages, while the application performs the HTTP requests.
+
+```ruby
+ecp = OneLogin::RubySaml::Ecp::Client.new
+
+# First hop: indicate to the SP that the client is ECP-capable.
+sp_response = http.post(sp_url, :headers => ecp.sp_headers)
+idp_request = ecp.from_sp(sp_response.body)
+
+# Second hop: send the plain SOAP AuthnRequest to the IdP.
+idp_response = http.post(
+  idp_request[:url],
+  :headers => idp_request[:headers],
+  :body => idp_request[:body]
+)
+
+# Final hop: return the SAML Response to responseConsumerURL.
+# RelayState stays in the ECP SOAP header and is never passed to Response validation.
+sp_acs_request = ecp.from_idp(
+  idp_response.body,
+  idp_request[:response_consumer_url],
+  idp_request[:relay_state]
+)
+http.post(
+  sp_acs_request[:url],
+  :headers => sp_acs_request[:headers],
+  :body => sp_acs_request[:body]
+)
+```
+
 ## Contributing
 
 ### Pay it Forward: Support RubySAML and Strengthen Open-Source Security
